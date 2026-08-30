@@ -28,7 +28,9 @@ The end-to-end release pipeline for the `ts` SDK Target builds on top of it:
 `scripts/release-ts.sh` orchestrates `src/cli.mjs`, `src/decide-release.mjs`, and
 `src/write-package-metadata.mjs` in sequence, then commits and tags the result into the SDK
 Target's own repository; `.github/workflows/release-ts.yml` runs it on a manual trigger. See the
-"Releasing the TypeScript SDK Target" section of `README.md` and `CONTEXT.md`.
+"Releasing the TypeScript SDK Target" and "Publishing the TypeScript SDK Release to npm" sections
+of `README.md`, and `CONTEXT.md`, for the full pipeline including the separate npm-publish workflow
+living in the `jsonhub-sdk-ts` repository itself.
 
 Architectural assumption:
 

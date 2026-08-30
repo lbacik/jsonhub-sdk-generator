@@ -328,7 +328,8 @@ module (see `AGENTS.md`):
 - **`scripts/publish-to-target.sh`** reads that verdict and, only when it says to release, writes
   the package metadata (as above), writes `.jsonhub/canonical-client-spec.json` into the freshly
   generated output so the *next* run has something to compare against, then replaces the contents
-  of `TARGET_DIR` with it, commits, and tags `v<version>` — the same version `decide-release` and
+  of `TARGET_DIR` with it — except `.github`, left untouched since it isn't generated output (see
+  below) — commits, and tags `v<version>` — the same version `decide-release` and
   `write-package-metadata` just derived. Otherwise it does nothing.
 
 Two prerequisites are operational, not code, and gate every real run:
@@ -337,6 +338,21 @@ Two prerequisites are operational, not code, and gate every real run:
   check it out and to push the release commit and tag;
 - a live API Contract URL, passed as the `api_url` workflow input or set once as the
   `JSONHUB_API_URL` repository variable.
+
+## Publishing the TypeScript SDK Release to npm
+
+Publishing to a registry happens outside this repository, in
+[`jsonhub-sdk-ts`](https://github.com/lbacik/jsonhub-sdk-ts) itself: its own
+`.github/workflows/publish.yml` reacts to the `v<version>` tag `publish-to-target.sh` just pushed,
+builds the package, runs `.github/scripts/smoke-test.cjs` against the built output, and only then
+runs `npm publish`. A broken SDK Release can't be unpublished cleanly, so a failing build or smoke
+test blocks publication outright.
+
+This keeps the `NPM_TOKEN` registry credential in the repository that actually uses it, rather than
+pooling every credential here — the same reasoning already applied to `JSONHUB_SDK_TS_TOKEN` above.
+It also means `scripts/publish-to-target.sh` must never wipe `jsonhub-sdk-ts`'s `.github` directory:
+that workflow is hand-maintained infrastructure, not part of the generated SDK Surface, and would
+otherwise be deleted by the very next release.
 
 ## Example next steps
 
