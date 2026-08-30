@@ -1,39 +1,39 @@
 # jh-client-generator
 
-Minimalny projekt B do generowania SDK z OpenAPI na podstawie specyfikacji pobieranej spod URL.
+A minimal Project B for generating SDKs from OpenAPI, based on a specification fetched from a URL.
 
-Założenia:
+Assumptions:
 
-- projekt A publikuje specyfikację OpenAPI jako `json` lub `yaml`,
-- projekt B uruchamia jeden CLI,
-- CLI pobiera specyfikację, zapisuje ją lokalnie w `.cache/`,
-- następnie wywołuje `openapi-generator` dla wybranego języka.
+- Project A publishes an OpenAPI specification as `json` or `yaml`,
+- Project B runs a single CLI,
+- the CLI fetches the specification and saves it locally in `.cache/`,
+- it then invokes `openapi-generator` for the selected language.
 
-## Dlaczego taka architektura
+## Why this architecture
 
-To jest najprostsze rozwiązanie, które nadal daje kontrolę:
+This is the simplest solution that still gives you control:
 
-- logika pobierania specyfikacji jest u Ciebie,
-- logika generowania kodu jest delegowana do sprawdzonego `openapi-generator`,
-- łatwo dodać kolejne targety albo własne szablony,
-- można uruchamiać lokalnie, w CI i z crona bez przepisywania generatora od zera.
+- the spec-fetching logic is yours,
+- the code-generation logic is delegated to the proven `openapi-generator`,
+- it's easy to add further targets or custom templates,
+- it can run locally, in CI, and from a cron job without rewriting the generator from scratch.
 
-## Obsługiwane targety
+## Supported targets
 
 - `ts` -> `typescript-fetch`
 - `js` -> `javascript`
 - `python` -> `python`
 - `php` -> `php`
 
-## Instalacja
+## Installation
 
 ```bash
 npm install
 ```
 
-Wymagany Node.js: `>=20.10.0`
+Required Node.js: `>=20.10.0`
 
-## Użycie
+## Usage
 
 ### TypeScript
 
@@ -44,8 +44,8 @@ npm run generate -- \
   --package-name my-api-sdk
 ```
 
-Jeżeli nie podasz `--output`, klient trafi domyślnie do `generated/<target>`.
-Jeżeli podasz `--output`, ta ścieżka jest traktowana jako finalny katalog wyjściowy:
+If you don't provide `--output`, the client goes to `generated/<target>` by default.
+If you provide `--output`, that path is treated as the final output directory:
 
 ```bash
 npm run generate -- \
@@ -54,18 +54,18 @@ npm run generate -- \
   --output ../jh-client
 ```
 
-W tym przykładzie SDK zostanie wygenerowane do `../jh-client`, bez dopisywania `/ts`.
+In this example the SDK will be generated into `../jh-client`, without appending `/ts`.
 
-Przy specyfikacjach JSON z wieloma formatami odpowiedzi CLI zawsze redukuje pobraną
-specyfikację do **Canonical Client Spec** przed generacją — dokumentu z dokładnie jedną
-reprezentacją na operację, zgodnie z jedną, współdzieloną polityką (patrz sekcja niżej),
-tak żeby generator budował modele tylko dla wybranej reprezentacji w `requestBody` i
-`responses`. Ten dokument trafia jako osobny plik do `.cache/canonical-client-spec.json`,
-więc można go otworzyć i przejrzeć niezależnie od tego, co wygenerował
-`openapi-generator`.
+For JSON specifications with multiple response formats, the CLI always reduces the
+fetched specification to a **Canonical Client Spec** before generation — a document with
+exactly one representation per operation, following one shared policy (see the section
+below) — so the generator only builds models for the chosen representation in
+`requestBody` and `responses`. This document is written as a separate file to
+`.cache/canonical-client-spec.json`, so you can open and inspect it independently of
+what `openapi-generator` produced.
 
-Jeżeli po generacji w `generated/ts/src/models` zostają modele, które nie są osiągalne
-z wygenerowanych klas API, możesz uruchomić dodatkowe przycinanie:
+If, after generation, `generated/ts/src/models` still has models that aren't reachable
+from the generated API classes, you can run additional pruning:
 
 ```bash
 npm run generate -- \
@@ -103,9 +103,9 @@ npm run generate -- \
   --composer-name my-company/api-sdk
 ```
 
-## Nagłówki do pobrania specyfikacji
+## Headers for fetching the specification
 
-Jeżeli specyfikacja jest chroniona, możesz przekazać nagłówki HTTP:
+If the specification is protected, you can pass HTTP headers:
 
 ```bash
 npm run generate -- \
@@ -115,9 +115,9 @@ npm run generate -- \
   --header "X-Tenant: demo"
 ```
 
-## Dodatkowe parametry generatora
+## Additional generator parameters
 
-Możesz dopisać własne `additionalProperties`:
+You can add your own `additionalProperties`:
 
 ```bash
 npm run generate -- \
@@ -129,55 +129,55 @@ npm run generate -- \
 
 ## Canonical Client Spec
 
-Jeżeli specyfikacja wystawia kilka wariantów `content` dla tej samej operacji, CLI
-redukuje ją przed generacją do dokładnie jednej reprezentacji na operację, według
-jednej, współdzielonej polityki — zamiast pojedynczej globalnej flagi
-`--prefer-media-type` (usuniętej):
+If the specification exposes several `content` variants for the same operation, the CLI
+reduces it before generation to exactly one representation per operation, following one
+shared policy — instead of the single global `--prefer-media-type` flag (removed):
 
 ```
-response 2xx      -> application/hal+json, z fallbackiem do application/json
+response 2xx      -> application/hal+json, falling back to application/json
 response 4xx/5xx  -> application/problem+json
 request body      -> application/json
   PATCH           -> application/merge-patch+json
-  formularze OAuth -> application/x-www-form-urlencoded
+  OAuth forms     -> application/x-www-form-urlencoded
 ```
 
-Wybór dla `responses` opiera się na kodzie statusu, a dla `requestBody` — na metodzie
-HTTP i obecności `application/x-www-form-urlencoded` w treści (formularze OAuth). Jeżeli
-żaden z preferowanych typów nie występuje w `content`, CLI zachowuje pierwszy dostępny
-typ, więc każda operacja zawsze kończy z dokładnie jedną reprezentacją.
+The choice for `responses` is based on the status code, and for `requestBody` on the
+HTTP method and the presence of `application/x-www-form-urlencoded` in the content
+(OAuth forms). If none of the preferred types is present in `content`, the CLI keeps the
+first available type, so every operation always ends up with exactly one representation.
 
-Redukcja jest czystą transformacją dokumentu (bez sieci i bez generowania kodu) i działa
-obecnie dla specyfikacji w formacie JSON. Wynik trafia jako osobny, możliwy do
-zainspekcjonowania plik do `.cache/canonical-client-spec.json`, i to on — a nie surowo
-pobrana specyfikacja — jest wejściem dla `openapi-generator`.
+The reduction is a pure document transformation (no network access, no code generation)
+and currently works for specifications in JSON format. The result is written as a
+separate, inspectable file to `.cache/canonical-client-spec.json`, and it — not the raw
+fetched specification — is the input for `openapi-generator`.
 
-## Przycinanie nieużywanych modeli
+## Pruning unused models
 
-Flaga `--prune-unused-models` działa obecnie dla targetu `ts`.
+The `--prune-unused-models` flag currently works for the `ts` target.
 
-To nie jest natywna opcja `openapi-generator`. CLI najpierw generuje pełny klient
-`typescript-fetch`, a potem usuwa z `src/models` i `docs/` te modele, które nie są
-osiągalne z `src/apis/*` ani z zależności modeli używanych przez API.
+This is not a native `openapi-generator` option. The CLI first generates the full
+`typescript-fetch` client, then removes from `src/models` and `docs/` the models that
+aren't reachable from `src/apis/*` or from the dependencies of models used by the API.
 
-W praktyce to pomaga przy specyfikacjach, które zawierają wiele alternatywnych
-reprezentacji albo nadmiarowe schematy pomocnicze, ale nadal najskuteczniejszą
-redukcją liczby modeli zwykle pozostaje redukcja do Canonical Client Spec opisana
-wyżej.
+In practice this helps with specifications that contain many alternative
+representations or redundant helper schemas, but the most effective way to reduce the
+number of models usually remains the reduction to the Canonical Client Spec described
+above.
 
-## Przykładowy dalszy rozwój
+## Example next steps
 
-To, co zwykle warto dodać w kolejnym kroku:
+What's usually worth adding next:
 
-1. plik konfiguracyjny `clients.config.json` z listą klientów do generacji,
-2. osobne presety per język zamiast jednej mapy w kodzie,
-3. własne szablony Mustache dla `openapi-generator`,
-4. walidację specyfikacji przed generacją,
-5. publikację paczek do npm / PyPI / Packagist w CI.
+1. a `clients.config.json` configuration file listing the clients to generate,
+2. separate per-language presets instead of a single map in the code,
+3. custom Mustache templates for `openapi-generator`,
+4. spec validation before generation,
+5. publishing packages to npm / PyPI / Packagist in CI.
 
-## Przykład następnego kroku
+## Example of the next step
 
-Jeżeli chcesz generować wiele SDK jednym poleceniem, rozszerzyłbym projekt o konfigurację w tym stylu:
+If you want to generate multiple SDKs with a single command, the project could be
+extended with a configuration in this style:
 
 ```json
 {
@@ -203,4 +203,5 @@ Jeżeli chcesz generować wiele SDK jednym poleceniem, rozszerzyłbym projekt o 
 }
 ```
 
-Wtedy CLI zamiast pojedynczego `--target` czytałby konfigurację i generował wszystkie klienty w jednym przebiegu.
+Then, instead of a single `--target`, the CLI would read the configuration and generate
+all clients in one run.

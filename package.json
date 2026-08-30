@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "CLI do generowania SDK z OpenAPI po URL dla JS/TS, Python i PHP.",
+  "description": "CLI for generating an SDK from OpenAPI by URL for JS/TS, Python, and PHP.",
   "bin": {
     "jh-client-generator": "./src/cli.mjs"
   },

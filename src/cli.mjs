@@ -45,7 +45,7 @@ function collect(value, previous) {
 function parseTarget(value) {
   if (!TARGETS[value]) {
     throw new InvalidArgumentError(
-      `Nieobsługiwany target "${value}". Dostępne: ${Object.keys(TARGETS).join(", ")}`
+      `Unsupported target "${value}". Available: ${Object.keys(TARGETS).join(", ")}`
     );
   }
 
@@ -56,7 +56,7 @@ function parseProperty(value, previous) {
   const separatorIndex = value.indexOf("=");
   if (separatorIndex === -1) {
     throw new InvalidArgumentError(
-      `Niepoprawne --property "${value}". Użyj formatu klucz=wartość.`
+      `Invalid --property "${value}". Use the key=value format.`
     );
   }
 
@@ -65,7 +65,7 @@ function parseProperty(value, previous) {
 
   if (!key || !propertyValue) {
     throw new InvalidArgumentError(
-      `Niepoprawne --property "${value}". Klucz i wartość są wymagane.`
+      `Invalid --property "${value}". Both key and value are required.`
     );
   }
 
@@ -134,7 +134,7 @@ async function fetchSpec(specUrl, headers) {
       const separatorIndex = headerLine.indexOf(":");
       if (separatorIndex === -1) {
         throw new Error(
-          `Niepoprawny nagłówek "${headerLine}". Użyj formatu "Nazwa: wartość".`
+          `Invalid header "${headerLine}". Use the "Name: value" format.`
         );
       }
 
@@ -146,7 +146,7 @@ async function fetchSpec(specUrl, headers) {
 
   if (!response.ok) {
     throw new Error(
-      `Nie udało się pobrać specyfikacji: ${response.status} ${response.statusText}`
+      `Failed to fetch the specification: ${response.status} ${response.statusText}`
     );
   }
 
@@ -154,7 +154,7 @@ async function fetchSpec(specUrl, headers) {
   const body = await response.text();
 
   if (!body.trim()) {
-    throw new Error("Pobrana specyfikacja jest pusta.");
+    throw new Error("The fetched specification is empty.");
   }
 
   const isYaml =
@@ -179,7 +179,7 @@ function canonicalizeFetchedSpec(spec) {
   try {
     document = JSON.parse(spec.body);
   } catch {
-    throw new Error("Nie udało się sparsować specyfikacji JSON.");
+    throw new Error("Failed to parse the JSON specification.");
   }
 
   return reduceToCanonicalClientSpec(document);
@@ -314,7 +314,7 @@ function runGenerator(args) {
         return;
       }
 
-      rejectPromise(new Error(`openapi-generator zakończył się kodem ${code}`));
+      rejectPromise(new Error(`openapi-generator exited with code ${code}`));
     });
   });
 }
@@ -323,46 +323,46 @@ const program = new Command();
 
 program
   .name("jh-client-generator")
-  .description("Generuje SDK z OpenAPI po URL dla JS/TS, Python i PHP.")
-  .requiredOption("--url <specUrl>", "URL do specyfikacji OpenAPI")
+  .description("Generates an SDK from OpenAPI by URL for JS/TS, Python, and PHP.")
+  .requiredOption("--url <specUrl>", "URL to the OpenAPI specification")
   .requiredOption("--target <target>", "Target: ts | js | python | php", parseTarget)
   .option(
     "--output <dir>",
-    "Katalog wyjściowy",
+    "Output directory",
     (value) => resolve(process.cwd(), value)
   )
   .option(
     "--package-name <name>",
-    "Nazwa paczki/projektu w wygenerowanym SDK"
+    "Package/project name in the generated SDK"
   )
   .option(
     "--package-version <version>",
-    "Wersja wygenerowanego SDK"
+    "Version of the generated SDK"
   )
   .option(
     "--composer-name <vendor/package>",
-    "Nazwa paczki Composer dla targetu php"
+    "Composer package name for the php target"
   )
   .option(
     "--header <name:value>",
-    "Nagłówek HTTP używany przy pobieraniu specyfikacji",
+    "HTTP header used when fetching the specification",
     collect,
     []
   )
   .option(
     "--property <key=value>",
-    "Dodatkowe additionalProperties przekazane do openapi-generator",
+    "Extra additionalProperties passed to openapi-generator",
     parseProperty,
     []
   )
   .option(
     "--skip-validate-spec",
-    "Wyłącza walidację specyfikacji po stronie generatora",
+    "Disables spec validation on the generator's side",
     false
   )
   .option(
     "--prune-unused-models",
-    "Po generacji targetu ts usuwa modele nieosiągalne z apis/* i ich zależności",
+    "After generating the ts target, removes models unreachable from apis/* and their dependencies",
     false
   )
   .action(async (options) => {
@@ -377,7 +377,7 @@ program
     await mkdir(cacheDir, { recursive: true });
     await mkdir(outputDir, { recursive: true });
     await writeFile(rawSpecFilePath, fetchedSpec.body, "utf8");
-    console.log(`Pobrano specyfikację do ${rawSpecFilePath}`);
+    console.log(`Fetched the specification to ${rawSpecFilePath}`);
 
     const canonicalDocument = canonicalizeFetchedSpec(fetchedSpec);
     let specFilePath = rawSpecFilePath;
@@ -386,10 +386,10 @@ program
       const canonicalSpecFilePath = join(cacheDir, "canonical-client-spec.json");
       await writeFile(canonicalSpecFilePath, JSON.stringify(canonicalDocument, null, 2), "utf8");
       specFilePath = canonicalSpecFilePath;
-      console.log(`Zredukowano specyfikację do Canonical Client Spec: ${canonicalSpecFilePath}`);
+      console.log(`Reduced the specification to a Canonical Client Spec: ${canonicalSpecFilePath}`);
     } else {
       console.log(
-        "Specyfikacja YAML — pominięto redukcję do Canonical Client Spec, generowanie z surowej specyfikacji."
+        "YAML specification — skipped the Canonical Client Spec reduction, generating from the raw specification."
       );
     }
 
@@ -412,27 +412,27 @@ program
       generatorArgs.push("--skip-validate-spec");
     }
 
-    console.log(`Generowanie targetu "${options.target}" do ${outputDir}`);
+    console.log(`Generating target "${options.target}" to ${outputDir}`);
 
     await runGenerator(generatorArgs);
 
     if (options.pruneUnusedModels) {
       if (options.target !== "ts") {
-        throw new Error("--prune-unused-models jest obecnie wspierane tylko dla targetu ts.");
+        throw new Error("--prune-unused-models is currently only supported for the ts target.");
       }
 
       const pruneResult = await pruneUnusedTsModels(outputDir);
       console.log(
-        `Usunięto ${pruneResult.removedCount} nieużywanych modeli, pozostawiono ${pruneResult.keptCount}.`
+        `Removed ${pruneResult.removedCount} unused models, kept ${pruneResult.keptCount}.`
       );
     }
 
-    console.log("Gotowe.");
+    console.log("Done.");
   });
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   program.parseAsync(process.argv).catch((error) => {
-    console.error(`Błąd: ${error.message}`);
+    console.error(`Error: ${error.message}`);
     process.exitCode = 1;
   });
 }

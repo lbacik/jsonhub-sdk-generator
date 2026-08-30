@@ -1,57 +1,58 @@
 # AGENTS.md
 
-## Cel repozytorium
+## Repository purpose
 
-To repozytorium zawiera projekt B: narzędzie CLI do generowania SDK na podstawie specyfikacji OpenAPI pobieranej spod URL.
+This repository contains Project B: a CLI tool for generating SDKs from an OpenAPI
+specification fetched from a URL.
 
-Zakres:
+Scope:
 
-- pobranie specyfikacji `json` lub `yaml`,
-- wygenerowanie klienta dla wybranego targetu,
-- utrzymanie prostego punktu wejścia do uruchamiania lokalnie i w CI.
+- fetching a `json` or `yaml` specification,
+- generating a client for the selected target,
+- keeping a simple entry point for running locally and in CI.
 
-Aktualnie wspierane targety:
+Currently supported targets:
 
 - `ts`
 - `js`
 - `python`
 - `php`
 
-## Architektura
+## Architecture
 
-Główna logika znajduje się w:
+The main logic lives in:
 
 - `src/cli.mjs`
 
-Założenie architektoniczne:
+Architectural assumption:
 
-- warstwa Node.js odpowiada za orkiestrację,
-- właściwe generowanie kodu wykonuje `@openapitools/openapi-generator-cli`,
-- wygenerowane artefakty trafiają do `generated/`,
-- tymczasowo pobrana specyfikacja trafia do `.cache/`.
+- the Node.js layer is responsible for orchestration,
+- the actual code generation is performed by `@openapitools/openapi-generator-cli`,
+- generated artifacts go to `generated/`,
+- the temporarily fetched specification goes to `.cache/`.
 
-Nie dodawaj własnego generatora SDK od zera, jeżeli problem da się rozwiązać przez:
+Don't add your own SDK generator from scratch if the problem can be solved through:
 
-- konfigurację `openapi-generator`,
-- dodatkowe `additionalProperties`,
-- własne szablony generatora,
-- warstwę post-processingu po generacji.
+- `openapi-generator` configuration,
+- extra `additionalProperties`,
+- custom generator templates,
+- a post-processing layer after generation.
 
-## Uruchamianie
+## Running
 
-Instalacja:
+Install:
 
 ```bash
 npm install
 ```
 
-Pomoc:
+Help:
 
 ```bash
 npm run help
 ```
 
-Przykład:
+Example:
 
 ```bash
 npm run generate -- \
@@ -60,49 +61,49 @@ npm run generate -- \
   --package-name my-api-sdk
 ```
 
-## Zasady zmian
+## Change principles
 
-Priorytety:
+Priorities:
 
-1. prostota CLI,
-2. przewidywalność generacji,
-3. łatwość użycia w CI,
-4. łatwość dodawania nowych targetów i presetów.
+1. CLI simplicity,
+2. predictable generation,
+3. ease of use in CI,
+4. ease of adding new targets and presets.
 
-Przy zmianach:
+When making changes:
 
-- utrzymuj jeden główny punkt wejścia CLI, chyba że rozdzielenie odpowiedzialności jest już wyraźnie potrzebne,
-- nie koduj na sztywno danych specyficznych dla jednego projektu A,
-- nowe targety dopisuj przez konfigurację mapy targetów i minimalny zestaw reguł per język,
-- preferuj parametryzację przez flagi CLI albo plik konfiguracyjny zamiast rozgałęzionego kodu,
-- dokumentuj nowe flagi i scenariusze w `README.md`.
+- keep one main CLI entry point unless separating responsibilities is already clearly needed,
+- don't hardcode data specific to a single Project A,
+- add new targets through the target map configuration and a minimal set of per-language rules,
+- prefer parametrization through CLI flags or a config file over branching code,
+- document new flags and scenarios in `README.md`.
 
-## Konwencje implementacyjne
+## Implementation conventions
 
-- Używaj ESM i Node.js `>=20`.
-- Trzymaj logikę parsowania opcji, pobierania specyfikacji i wywołania generatora rozdzieloną funkcjonalnie.
-- Komunikaty błędów mają być krótkie i operacyjne.
-- Jeżeli dodajesz nowe parametry generatora, expose'uj je przez CLI tylko wtedy, gdy mają realną wartość dla użytkownika.
-- Jeżeli potrzeba bardziej złożonej konfiguracji, preferowany kierunek to plik typu `clients.config.json`.
+- Use ESM and Node.js `>=20`.
+- Keep option-parsing, spec-fetching, and generator-invocation logic functionally separated.
+- Error messages should be short and actionable.
+- If you add new generator parameters, expose them through the CLI only when they have real value for the user.
+- If more complex configuration is needed, the preferred direction is a `clients.config.json`-style file.
 
-## Oczekiwany dalszy rozwój
+## Expected future development
 
-Naturalne kolejne kroki:
+Natural next steps:
 
-- obsługa wielu klientów z jednego pliku konfiguracyjnego,
-- presety dla poszczególnych języków,
-- wsparcie dla własnych szablonów Mustache,
-- walidacja specyfikacji przed generacją,
-- automaty publikacji paczek.
+- support for multiple clients from a single configuration file,
+- per-language presets,
+- support for custom Mustache templates,
+- spec validation before generation,
+- package publishing automation.
 
-## Czego unikać
+## What to avoid
 
-- mieszania logiki pobierania specyfikacji z logiką publikacji paczek w jednym module,
-- ukrytych zależności od konkretnego URL lub konkretnego formatu odpowiedzi,
-- ręcznego edytowania wygenerowanego kodu w `generated/` jako docelowego rozwiązania,
-- rozbudowy CLI o funkcje niezwiązane z generowaniem SDK.
+- mixing spec-fetching logic with package-publishing logic in a single module,
+- hidden dependencies on a specific URL or a specific response format,
+- hand-editing generated code in `generated/` as a permanent solution,
+- growing the CLI with features unrelated to SDK generation.
 
-Wyjątek: `src/normalizer.mjs` celowo koduje na sztywno politykę wyboru media type
-(Canonical Client Spec, patrz `CONTEXT.md`). To świadoma decyzja domenowa — jedna,
-współdzielona polityka zamiast konfigurowalnej flagi, tak żeby SDK Targety nie mogły
-się już rozjechać — a nie porzucenie powyższej zasady.
+Exception: `src/normalizer.mjs` deliberately hardcodes the media type selection policy
+(the Canonical Client Spec, see `CONTEXT.md`). This is a deliberate domain decision — one
+shared policy instead of a configurable flag, so the SDK Targets can no longer drift apart
+— not an abandonment of the rule above.
