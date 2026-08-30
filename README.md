@@ -348,11 +348,22 @@ builds the package, runs `.github/scripts/smoke-test.cjs` against the built outp
 runs `npm publish`. A broken SDK Release can't be unpublished cleanly, so a failing build or smoke
 test blocks publication outright.
 
-This keeps the `NPM_TOKEN` registry credential in the repository that actually uses it, rather than
-pooling every credential here — the same reasoning already applied to `JSONHUB_SDK_TS_TOKEN` above.
-It also means `scripts/publish-to-target.sh` must never wipe `jsonhub-sdk-ts`'s `.github` directory:
-that workflow is hand-maintained infrastructure, not part of the generated SDK Surface, and would
-otherwise be deleted by the very next release.
+It authenticates via npm's [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC)
+rather than a stored `NPM_TOKEN` secret: `id-token: write` lets npm's CLI exchange a GitHub Actions
+OIDC token for a short-lived publish token, so no long-lived registry credential lives in either
+repository at all — a stronger version of the reasoning already applied to `JSONHUB_SDK_TS_TOKEN`
+above. It also means `scripts/publish-to-target.sh` must never wipe `jsonhub-sdk-ts`'s `.github`
+directory: that workflow is hand-maintained infrastructure, not part of the generated SDK Surface,
+and would otherwise be deleted by the very next release.
+
+Trusted Publishing needs a one-time, manual setup on npmjs.com, since npm (unlike PyPI) only lets
+you configure a trusted publisher for a package that already exists:
+
+1. Publish `jsonhub-sdk-ts@<first version>` once by hand (`npm publish` from a local checkout,
+   logged in as a maintainer) to claim the package name.
+2. On the package's settings page on npmjs.com, add a Trusted Publisher: provider GitHub Actions,
+   organization/user `lbacik`, repository `jsonhub-sdk-ts`, workflow filename `publish.yml`.
+3. Every tag pushed after that publishes through the workflow with no credential to rotate or leak.
 
 ## Example next steps
 
