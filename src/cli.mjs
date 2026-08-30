@@ -6,6 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
+import { reduceToCanonicalClientSpec } from "./normalizer.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 
@@ -69,16 +71,6 @@ function parseProperty(value, previous) {
 
   previous.push([key, propertyValue]);
   return previous;
-}
-
-function parseMediaType(value) {
-  const mediaType = value.trim();
-
-  if (!mediaType) {
-    throw new InvalidArgumentError("Niepoprawne --prefer-media-type. Wartość jest wymagana.");
-  }
-
-  return mediaType;
 }
 
 function normalizePackageName(input) {
@@ -177,60 +169,9 @@ async function fetchSpec(specUrl, headers) {
   };
 }
 
-function preferContentMediaType(content, mediaType) {
-  if (!content || typeof content !== "object" || Array.isArray(content)) {
-    return { content, changed: false };
-  }
-
-  if (!(mediaType in content)) {
-    return { content, changed: false };
-  }
-
-  return {
-    content: {
-      [mediaType]: content[mediaType]
-    },
-    changed: Object.keys(content).length > 1
-  };
-}
-
-function preferFirstAvailableContentMediaType(content, mediaTypes) {
-  if (!content || typeof content !== "object" || Array.isArray(content)) {
-    return { content, changed: false };
-  }
-
-  const selectedMediaType = mediaTypes.find((mediaType) => mediaType in content);
-
-  if (!selectedMediaType) {
-    return { content, changed: false };
-  }
-
-  return {
-    content: {
-      [selectedMediaType]: content[selectedMediaType]
-    },
-    changed: Object.keys(content).length > 1
-  };
-}
-
-function responseMediaTypePreference(preferredMediaType) {
-  return [
-    preferredMediaType,
-    "application/problem+json",
-    "application/json"
-  ].filter((mediaType, index, mediaTypes) => mediaTypes.indexOf(mediaType) === index);
-}
-
-function preprocessSpec(spec, options) {
-  if (!options.preferMediaType) {
-    return {
-      body: spec.body,
-      changed: false
-    };
-  }
-
+function canonicalizeFetchedSpec(spec) {
   if (spec.extension !== "json") {
-    throw new Error("Preprocessing --prefer-media-type jest obecnie wspierany tylko dla specyfikacji JSON.");
+    return null;
   }
 
   let document;
@@ -241,53 +182,7 @@ function preprocessSpec(spec, options) {
     throw new Error("Nie udało się sparsować specyfikacji JSON.");
   }
 
-  let changed = false;
-  const paths = document.paths ?? {};
-  const responseMediaTypes = responseMediaTypePreference(options.preferMediaType);
-
-  for (const pathItem of Object.values(paths)) {
-    if (!pathItem || typeof pathItem !== "object" || Array.isArray(pathItem)) {
-      continue;
-    }
-
-    for (const operation of Object.values(pathItem)) {
-      if (!operation || typeof operation !== "object" || Array.isArray(operation)) {
-        continue;
-      }
-
-      if (operation.requestBody?.content) {
-        const result = preferContentMediaType(
-          operation.requestBody.content,
-          options.preferMediaType
-        );
-        operation.requestBody.content = result.content;
-        changed = changed || result.changed;
-      }
-
-      if (!operation.responses || typeof operation.responses !== "object") {
-        continue;
-      }
-
-      for (const response of Object.values(operation.responses)) {
-        if (!response || typeof response !== "object" || Array.isArray(response)) {
-          continue;
-        }
-
-        if (!response.content) {
-          continue;
-        }
-
-        const result = preferFirstAvailableContentMediaType(response.content, responseMediaTypes);
-        response.content = result.content;
-        changed = changed || result.changed;
-      }
-    }
-  }
-
-  return {
-    body: JSON.stringify(document, null, 2),
-    changed
-  };
+  return reduceToCanonicalClientSpec(document);
 }
 
 function collectImportedModels(fileContent, importPath) {
@@ -461,11 +356,6 @@ program
     []
   )
   .option(
-    "--prefer-media-type <mediaType>",
-    "Preferowany media type dla content; responses mogą użyć bezpiecznego fallbacku JSON",
-    parseMediaType
-  )
-  .option(
     "--skip-validate-spec",
     "Wyłącza walidację specyfikacji po stronie generatora",
     false
@@ -478,16 +368,30 @@ program
   .action(async (options) => {
     const targetConfig = TARGETS[options.target];
     const fetchedSpec = await fetchSpec(options.url, options.header);
-    const spec = preprocessSpec(fetchedSpec, options);
     const cacheDir = resolve(rootDir, ".cache");
-    const specFilePath = join(cacheDir, `openapi.${fetchedSpec.extension}`);
+    const rawSpecFilePath = join(cacheDir, `openapi.${fetchedSpec.extension}`);
     const outputDir = options.output
       ? options.output
       : resolve(process.cwd(), "generated", options.target);
 
     await mkdir(cacheDir, { recursive: true });
     await mkdir(outputDir, { recursive: true });
-    await writeFile(specFilePath, spec.body, "utf8");
+    await writeFile(rawSpecFilePath, fetchedSpec.body, "utf8");
+    console.log(`Pobrano specyfikację do ${rawSpecFilePath}`);
+
+    const canonicalDocument = canonicalizeFetchedSpec(fetchedSpec);
+    let specFilePath = rawSpecFilePath;
+
+    if (canonicalDocument) {
+      const canonicalSpecFilePath = join(cacheDir, "canonical-client-spec.json");
+      await writeFile(canonicalSpecFilePath, JSON.stringify(canonicalDocument, null, 2), "utf8");
+      specFilePath = canonicalSpecFilePath;
+      console.log(`Zredukowano specyfikację do Canonical Client Spec: ${canonicalSpecFilePath}`);
+    } else {
+      console.log(
+        "Specyfikacja YAML — pominięto redukcję do Canonical Client Spec, generowanie z surowej specyfikacji."
+      );
+    }
 
     const additionalProperties = createBaseProperties(options, targetConfig);
     const generatorArgs = [
@@ -508,14 +412,6 @@ program
       generatorArgs.push("--skip-validate-spec");
     }
 
-    console.log(`Pobrano specyfikację do ${specFilePath}`);
-    if (options.preferMediaType) {
-      console.log(
-        spec.changed
-          ? `Przefiltrowano content do media type "${options.preferMediaType}".`
-          : `Media type "${options.preferMediaType}" nie wymagał zmian w content.`
-      );
-    }
     console.log(`Generowanie targetu "${options.target}" do ${outputDir}`);
 
     await runGenerator(generatorArgs);
@@ -541,9 +437,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   });
 }
 
-export {
-  preferContentMediaType,
-  preferFirstAvailableContentMediaType,
-  preprocessSpec,
-  responseMediaTypePreference
-};
+export { canonicalizeFetchedSpec };

@@ -101,3 +101,8 @@ Naturalne kolejne kroki:
 - ukrytych zależności od konkretnego URL lub konkretnego formatu odpowiedzi,
 - ręcznego edytowania wygenerowanego kodu w `generated/` jako docelowego rozwiązania,
 - rozbudowy CLI o funkcje niezwiązane z generowaniem SDK.
+
+Wyjątek: `src/normalizer.mjs` celowo koduje na sztywno politykę wyboru media type
+(Canonical Client Spec, patrz `CONTEXT.md`). To świadoma decyzja domenowa — jedna,
+współdzielona polityka zamiast konfigurowalnej flagi, tak żeby SDK Targety nie mogły
+się już rozjechać — a nie porzucenie powyższej zasady.

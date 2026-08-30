@@ -56,16 +56,13 @@ npm run generate -- \
 
 W tym przykładzie SDK zostanie wygenerowane do `../jh-client`, bez dopisywania `/ts`.
 
-Przy specyfikacjach z wieloma formatami odpowiedzi możesz wskazać preferowany `media type`,
-żeby generator budował modele tylko dla niego w `requestBody` i `responses`:
-
-```bash
-npm run generate -- \
-  --url https://example.com/openapi.json \
-  --target ts \
-  --package-name my-api-sdk \
-  --prefer-media-type application/hal+json
-```
+Przy specyfikacjach JSON z wieloma formatami odpowiedzi CLI zawsze redukuje pobraną
+specyfikację do **Canonical Client Spec** przed generacją — dokumentu z dokładnie jedną
+reprezentacją na operację, zgodnie z jedną, współdzieloną polityką (patrz sekcja niżej),
+tak żeby generator budował modele tylko dla wybranej reprezentacji w `requestBody` i
+`responses`. Ten dokument trafia jako osobny plik do `.cache/canonical-client-spec.json`,
+więc można go otworzyć i przejrzeć niezależnie od tego, co wygenerował
+`openapi-generator`.
 
 Jeżeli po generacji w `generated/ts/src/models` zostają modele, które nie są osiągalne
 z wygenerowanych klas API, możesz uruchomić dodatkowe przycinanie:
@@ -130,26 +127,30 @@ npm run generate -- \
   --property npmVersion=2.0.0
 ```
 
-## Preferowany media type
+## Canonical Client Spec
 
-Jeżeli specyfikacja wystawia kilka wariantów `content` dla tej samej operacji, możesz
-przefiltrować ją przed generacją:
+Jeżeli specyfikacja wystawia kilka wariantów `content` dla tej samej operacji, CLI
+redukuje ją przed generacją do dokładnie jednej reprezentacji na operację, według
+jednej, współdzielonej polityki — zamiast pojedynczej globalnej flagi
+`--prefer-media-type` (usuniętej):
 
-```bash
-npm run generate -- \
-  --url https://example.com/openapi.json \
-  --target ts \
-  --prefer-media-type application/hal+json
+```
+response 2xx      -> application/hal+json, z fallbackiem do application/json
+response 4xx/5xx  -> application/problem+json
+request body      -> application/json
+  PATCH           -> application/merge-patch+json
+  formularze OAuth -> application/x-www-form-urlencoded
 ```
 
-CLI zostawia wtedy tylko wskazany `media type` w `requestBody`, ale tylko tam, gdzie ten
-wariant faktycznie istnieje. Dla `responses` używa wskazanego wariantu jako pierwszego
-wyboru, a gdy go brakuje, wybiera kolejno `application/problem+json` i
-`application/json`, jeżeli są dostępne. To upraszcza modele generowane przez
-`openapi-generator` i pozwala uniknąć konfliktów między alternatywnymi reprezentacjami,
-np. `application/ld+json` i `application/hal+json`.
+Wybór dla `responses` opiera się na kodzie statusu, a dla `requestBody` — na metodzie
+HTTP i obecności `application/x-www-form-urlencoded` w treści (formularze OAuth). Jeżeli
+żaden z preferowanych typów nie występuje w `content`, CLI zachowuje pierwszy dostępny
+typ, więc każda operacja zawsze kończy z dokładnie jedną reprezentacją.
 
-Obecnie preprocessing działa dla specyfikacji w formacie JSON.
+Redukcja jest czystą transformacją dokumentu (bez sieci i bez generowania kodu) i działa
+obecnie dla specyfikacji w formacie JSON. Wynik trafia jako osobny, możliwy do
+zainspekcjonowania plik do `.cache/canonical-client-spec.json`, i to on — a nie surowo
+pobrana specyfikacja — jest wejściem dla `openapi-generator`.
 
 ## Przycinanie nieużywanych modeli
 
@@ -161,8 +162,8 @@ osiągalne z `src/apis/*` ani z zależności modeli używanych przez API.
 
 W praktyce to pomaga przy specyfikacjach, które zawierają wiele alternatywnych
 reprezentacji albo nadmiarowe schematy pomocnicze, ale nadal najskuteczniejszą
-redukcją liczby modeli zwykle pozostaje wcześniejsze zawężenie specyfikacji przez
-`--prefer-media-type`.
+redukcją liczby modeli zwykle pozostaje redukcja do Canonical Client Spec opisana
+wyżej.
 
 ## Przykładowy dalszy rozwój
 
