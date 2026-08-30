@@ -58,13 +58,15 @@ mkdir -p "$CURRENT_SURFACE/.jsonhub"
 cp "$WORK_DIR/canonical-client-spec.json" "$CURRENT_SURFACE/.jsonhub/canonical-client-spec.json"
 
 echo "== Committing and tagging jsonhub-sdk-ts v$VERSION =="
-# .github is excluded from the wipe alongside .git: it holds the hand-maintained
-# npm publish workflow (see README's "Publishing the TypeScript SDK Release to
-# npm"), not something openapi-generator ever emits, so it would otherwise be
-# deleted by every release. The unqualified copy below is safe only as long as
-# that holds - $CURRENT_SURFACE never containing a .github of its own - since
-# cp -a has no matching exclusion.
-find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" -exec rm -rf {} +
+# .github and package-lock.json are excluded from the wipe alongside .git:
+# .github holds the hand-maintained npm publish workflow (see README's
+# "Publishing the TypeScript SDK Release to npm") and package-lock.json is a
+# lockfile a human ran - neither is something openapi-generator ever emits, so
+# both would otherwise be deleted by every release. The unqualified copy below
+# is safe only as long as that holds - $CURRENT_SURFACE never containing a
+# .github or package-lock.json of its own - since cp -a has no matching
+# exclusion.
+find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name "package-lock.json" -exec rm -rf {} +
 cp -a "$CURRENT_SURFACE/." "$TARGET_DIR/"
 
 (
