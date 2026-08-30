@@ -164,6 +164,57 @@ representations or redundant helper schemas, but the most effective way to reduc
 number of models usually remains the reduction to the Canonical Client Spec described
 above.
 
+## Deciding whether and how much to release
+
+Once an SDK Target is regenerated, a separate command decides whether the change is worth
+publishing and how large it is — without publishing anything itself:
+
+```bash
+npm run decide-release -- \
+  --previous-canonical-client-spec .cache/previous/canonical-client-spec.json \
+  --current-canonical-client-spec .cache/canonical-client-spec.json \
+  --previous-surface generated/previous/ts \
+  --current-surface generated/ts \
+  --previous-toolchain-version openapi-generator@7.1.0 \
+  --current-toolchain-version openapi-generator@7.1.0 \
+  --version-bearing-file package.json
+```
+
+It prints its verdict as JSON, for example:
+
+```json
+{
+  "shouldRelease": true,
+  "bump": "minor",
+  "reason": "sdk-surface-changed",
+  "breakingChanges": [],
+  "additiveChanges": ["operation added: GET /definitions/{id}"]
+}
+```
+
+Three detectors run in sequence, and they are allowed to disagree — see `CONTEXT.md` for why
+there are three and not one:
+
+1. A digest of the Canonical Client Spec, as a cheap filter — unchanged (with the toolchain
+   version also unchanged) stops before anything else runs.
+2. A comparison of the generated SDK Surface, excluding any `--version-bearing-file` (repeat
+   the flag for more than one), which decides *whether* to release.
+3. A structured comparison of the previous and current Canonical Client Spec, plus the
+   toolchain version, which decides *how much* to bump:
+
+```
+breaking change reported             -> major
+additive change reported             -> minor
+generator or toolchain version moved -> minor floor
+otherwise                            -> patch
+```
+
+The decision itself (`decideRelease` in `src/release-decision.mjs`) is a pure function of the
+previous/current Canonical Client Spec, the previous/current SDK Surface, and the toolchain
+version — it performs no I/O and never releases anything on its own. Per this repository's
+[SDK versioning ADR](docs/adr/0001-sdk-versioning.md), each SDK Target versions independently,
+so the bump level is always about that target's own compatibility, never the API's.
+
 ## Example next steps
 
 What's usually worth adding next:

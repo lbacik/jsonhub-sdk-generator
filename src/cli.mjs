@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import { reduceToCanonicalClientSpec } from "./normalizer.mjs";
+import { collect, runIfMain } from "./cli-utils.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
@@ -36,11 +37,6 @@ const TARGETS = {
     supportsComposerName: true
   }
 };
-
-function collect(value, previous) {
-  previous.push(value);
-  return previous;
-}
 
 function parseTarget(value) {
   if (!TARGETS[value]) {
@@ -430,11 +426,6 @@ program
     console.log("Done.");
   });
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  program.parseAsync(process.argv).catch((error) => {
-    console.error(`Error: ${error.message}`);
-    process.exitCode = 1;
-  });
-}
+runIfMain(import.meta.url, program);
 
 export { canonicalizeFetchedSpec };

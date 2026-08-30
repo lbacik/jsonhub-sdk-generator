@@ -10,6 +10,7 @@
   "scripts": {
     "generate": "node ./src/cli.mjs",
     "help": "node ./src/cli.mjs --help",
+    "decide-release": "node ./src/decide-release.mjs",
     "test": "node --test"
   },
   "engines": {
