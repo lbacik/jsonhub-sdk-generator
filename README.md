@@ -164,6 +164,21 @@ representations or redundant helper schemas, but the most effective way to reduc
 number of models usually remains the reduction to the Canonical Client Spec described
 above.
 
+## Fetching without generating
+
+`--skip-generation` fetches the specification and writes the Canonical Client Spec (for JSON
+input) without invoking `openapi-generator`:
+
+```bash
+npm run generate -- \
+  --url https://example.com/openapi.json \
+  --target ts \
+  --skip-generation
+```
+
+This is how the release pipeline (below) answers its cheap "did the API Contract change at
+all?" check before paying for a full generation run.
+
 ## Deciding whether and how much to release
 
 Once an SDK Target is regenerated, a separate command decides whether the change is worth
@@ -266,6 +281,62 @@ output too, but `PACKAGE_NAME_BY_TARGET` in `src/package-metadata.mjs` and
 repository holds hand-owned metadata for today. Adding a target here means adding its entry to
 `PACKAGE_NAME_BY_TARGET` and a matching `manifests/<target>/package.metadata.json` — `php` stays
 excluded, since it isn't an SDK Target (see `CONTEXT.md`).
+
+## Releasing the TypeScript SDK Target
+
+`.github/workflows/release-ts.yml` runs the full path end to end, triggered by hand
+(`workflow_dispatch`): it fetches the API Contract from the live API, generates the `ts` SDK
+Surface, decides whether and how much to release, writes the package metadata, and — only if
+the SDK Surface actually changed — commits and tags the result into the
+[`jsonhub-sdk-ts`](https://github.com/lbacik/jsonhub-sdk-ts) repository. Nothing is published to
+npm yet; that is a later step. Run it twice against an unchanged API and the second run makes no
+commit and no tag — that is the behaviour the whole pipeline exists to produce.
+
+The workflow itself only checks out the two repositories and installs dependencies; the pipeline
+steps run in `scripts/release-ts.sh`, which you can also run locally:
+
+```bash
+GENERATOR_DIR=$(pwd) \
+TARGET_DIR=/path/to/a/checkout/of/jsonhub-sdk-ts \
+API_URL=https://example.com/openapi.json \
+SOURCE_API_VERSION=v0.9.3 \
+  ./scripts/release-ts.sh
+```
+
+Set `SKIP_PUSH=1` to commit and tag `TARGET_DIR` locally without pushing — useful for a dry run
+against a scratch clone.
+
+`release-ts.sh` is a thin wrapper over two single-purpose scripts, kept apart per this
+repository's own rule against mixing spec-fetching logic with package-publishing logic in one
+module (see `AGENTS.md`):
+
+- **`scripts/generate-and-decide.sh`** (read-only against `TARGET_DIR`) snapshots what is already
+  committed in `jsonhub-sdk-ts` — its SDK Surface and, from `.jsonhub/canonical-client-spec.json`,
+  the Canonical Client Spec that produced it — fetches the live API Contract with
+  `--skip-generation` (above), and checks its digest against the previous one. Three change
+  detectors are involved in total, and are allowed to disagree — see `CONTEXT.md` and
+  `src/release-decision.mjs` for why there are three and not one:
+
+  1. that digest, a cheap filter that stops the run **before generation** once the API and the
+     toolchain are both unchanged — the API Contract is fetched, but `openapi-generator` never
+     runs;
+  2. a comparison of the generated SDK Surface, deciding *whether* to release — run by
+     `decide-release` once the digest says something did change;
+  3. a structured comparison of the previous and current Canonical Client Spec, deciding *how
+     much* to bump — run by `decide-release` alongside detector 2.
+
+- **`scripts/publish-to-target.sh`** reads that verdict and, only when it says to release, writes
+  the package metadata (as above), writes `.jsonhub/canonical-client-spec.json` into the freshly
+  generated output so the *next* run has something to compare against, then replaces the contents
+  of `TARGET_DIR` with it, commits, and tags `v<version>` — the same version `decide-release` and
+  `write-package-metadata` just derived. Otherwise it does nothing.
+
+Two prerequisites are operational, not code, and gate every real run:
+
+- a `JSONHUB_SDK_TS_TOKEN` repository secret: a PAT with push access to `jsonhub-sdk-ts`, used to
+  check it out and to push the release commit and tag;
+- a live API Contract URL, passed as the `api_url` workflow input or set once as the
+  `JSONHUB_API_URL` repository variable.
 
 ## Example next steps
 

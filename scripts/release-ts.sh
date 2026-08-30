@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The first end-to-end SDK pipeline run for the ts SDK Target: fetch the API
+# Contract, reduce+generate the SDK Surface, decide whether and how much to
+# release, then commit and tag into the SDK Target's own repository
+# (jsonhub-sdk-ts). Delegates to two single-purpose scripts, kept apart per
+# AGENTS.md ("avoid mixing spec-fetching logic with package-publishing logic
+# in a single module"):
+#   scripts/generate-and-decide.sh - fetch, generate, decide (read-only)
+#   scripts/publish-to-target.sh   - write metadata, commit, tag, push
+# Called by .github/workflows/release-ts.yml; see CONTEXT.md and
+# docs/adr/0001-sdk-versioning.md for the domain vocabulary.
+#
+# Required environment variables:
+#   GENERATOR_DIR        checkout of this repository
+#   TARGET_DIR            checkout of the jsonhub-sdk-ts repository, pushable
+#   API_URL               URL of the live API Contract (OpenAPI JSON)
+#   SOURCE_API_VERSION    API Release this run generates the SDK Surface from, e.g. v0.9.3
+#
+# Optional environment variables:
+#   WORK_DIR              scratch directory for surfaces/specs (default: a fresh mktemp dir)
+#   TARGET_BRANCH         branch in TARGET_DIR to commit and push to (default: main)
+#   GIT_USER_NAME / GIT_USER_EMAIL   committer identity for the commit in TARGET_DIR
+#   SKIP_PUSH             when "1", commits/tags TARGET_DIR locally but skips `git push` (used by local dry runs)
+
+: "${GENERATOR_DIR:?}"
+: "${TARGET_DIR:?}"
+: "${API_URL:?}"
+: "${SOURCE_API_VERSION:?}"
+
+export WORK_DIR="${WORK_DIR:-$(mktemp -d)}"
+
+"$GENERATOR_DIR/scripts/generate-and-decide.sh"
+"$GENERATOR_DIR/scripts/publish-to-target.sh"

@@ -24,6 +24,12 @@ The main logic lives in:
 
 - `src/cli.mjs`
 
+The end-to-end release pipeline for the `ts` SDK Target builds on top of it:
+`scripts/release-ts.sh` orchestrates `src/cli.mjs`, `src/decide-release.mjs`, and
+`src/write-package-metadata.mjs` in sequence, then commits and tags the result into the SDK
+Target's own repository; `.github/workflows/release-ts.yml` runs it on a manual trigger. See the
+"Releasing the TypeScript SDK Target" section of `README.md` and `CONTEXT.md`.
+
 Architectural assumption:
 
 - the Node.js layer is responsible for orchestration,

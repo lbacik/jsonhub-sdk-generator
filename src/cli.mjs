@@ -361,6 +361,11 @@ program
     "After generating the ts target, removes models unreachable from apis/* and their dependencies",
     false
   )
+  .option(
+    "--skip-generation",
+    "Fetch and write the (Canonical Client Spec-reduced) specification only, without invoking openapi-generator",
+    false
+  )
   .action(async (options) => {
     const targetConfig = TARGETS[options.target];
     const fetchedSpec = await fetchSpec(options.url, options.header);
@@ -387,6 +392,11 @@ program
       console.log(
         "YAML specification — skipped the Canonical Client Spec reduction, generating from the raw specification."
       );
+    }
+
+    if (options.skipGeneration) {
+      console.log("--skip-generation set — not invoking openapi-generator.");
+      return;
     }
 
     const additionalProperties = createBaseProperties(options, targetConfig);

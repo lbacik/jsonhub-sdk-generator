@@ -1,0 +1,79 @@
+name: Release TypeScript SDK
+
+# The first end-to-end pipeline run for the ts SDK Target: fetch the live API
+# Contract, reduce it to a Canonical Client Spec, generate the SDK Surface,
+# decide whether and how much to release, write package metadata, then commit
+# and tag into the jsonhub-sdk-ts repository. Nothing is published to npm
+# here - see CONTEXT.md and the parent design (issue #1) for the full pipeline.
+#
+# Triggered by hand only, for now: the notification from the API repository
+# after a deploy is a later addition, not part of this first run.
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: >-
+          URL of the live API Contract (OpenAPI JSON). Leave empty to use the
+          JSONHUB_API_URL repository variable.
+        required: false
+        type: string
+      source_api_version:
+        description: "API Release this run generates the SDK Surface from, e.g. v0.9.3"
+        required: true
+        type: string
+
+# Never run two releases of the same SDK Target at once - both would read the
+# same "previous" state in jsonhub-sdk-ts and race to push.
+concurrency:
+  group: release-ts
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out jh-client-generator
+        uses: actions/checkout@v4
+        with:
+          path: generator
+
+      - name: Check out jsonhub-sdk-ts
+        uses: actions/checkout@v4
+        with:
+          repository: lbacik/jsonhub-sdk-ts
+          token: ${{ secrets.JSONHUB_SDK_TS_TOKEN }}
+          path: target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # openapi-generator-cli wraps a Java-based generator.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        working-directory: generator
+        run: npm ci
+
+      # scripts/release-ts.sh runs the full path end to end via two
+      # single-purpose scripts (fetch/generate/decide, then publish - see
+      # AGENTS.md on not mixing the two), running three change detectors in
+      # sequence, allowed to disagree - see CONTEXT.md and
+      # src/release-decision.mjs for why there are three and not one:
+      #   1. a Canonical Client Spec digest, a cheap filter that stops the
+      #      run before the SDK Surface is generated at all;
+      #   2. a generated SDK Surface comparison, deciding *whether* to release;
+      #   3. a structured Canonical Client Spec comparison, deciding *how
+      #      much* to bump.
+      # An unchanged API Contract leaves jsonhub-sdk-ts untouched: no commit,
+      # no tag, no push.
+      - name: Run the release pipeline
+        env:
+          GENERATOR_DIR: ${{ github.workspace }}/generator
+          TARGET_DIR: ${{ github.workspace }}/target
+          API_URL: ${{ inputs.api_url || vars.JSONHUB_API_URL }}
+          SOURCE_API_VERSION: ${{ inputs.source_api_version }}
+        run: generator/scripts/release-ts.sh
