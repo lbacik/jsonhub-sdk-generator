@@ -13,11 +13,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 import { decideRelease } from "./release-decision.mjs";
-import { collect, runIfMain } from "./cli-utils.mjs";
-
-async function readJsonFile(filePath) {
-  return JSON.parse(await readFile(filePath, "utf8"));
-}
+import { collect, readJsonFile, runIfMain } from "./cli-utils.mjs";
 
 async function readSdkSurface(dir) {
   const relativePaths = await readdir(dir, { recursive: true });

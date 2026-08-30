@@ -11,6 +11,7 @@
     "generate": "node ./src/cli.mjs",
     "help": "node ./src/cli.mjs --help",
     "decide-release": "node ./src/decide-release.mjs",
+    "write-package-metadata": "node ./src/write-package-metadata.mjs",
     "test": "node --test"
   },
   "engines": {

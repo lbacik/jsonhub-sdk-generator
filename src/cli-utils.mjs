@@ -1,14 +1,19 @@
 /**
  * Small pieces shared by this repository's CLI entry points
- * (src/cli.mjs, src/decide-release.mjs).
+ * (src/cli.mjs, src/decide-release.mjs, src/write-package-metadata.mjs).
  */
 
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 function collect(value, previous) {
   previous.push(value);
   return previous;
+}
+
+async function readJsonFile(filePath) {
+  return JSON.parse(await readFile(filePath, "utf8"));
 }
 
 function runIfMain(moduleUrl, program) {
@@ -20,4 +25,4 @@ function runIfMain(moduleUrl, program) {
   }
 }
 
-export { collect, runIfMain };
+export { collect, readJsonFile, runIfMain };

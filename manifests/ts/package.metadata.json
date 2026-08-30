@@ -1,0 +1,9 @@
+{
+  "author": "Łukasz Bacik <mail@luka.sh>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lbacik/jsonhub-sdk-ts.git"
+  },
+  "keywords": ["jsonhub", "sdk", "openapi", "typescript", "api-client"]
+}

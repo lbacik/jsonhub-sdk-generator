@@ -215,6 +215,58 @@ version — it performs no I/O and never releases anything on its own. Per this 
 [SDK versioning ADR](docs/adr/0001-sdk-versioning.md), each SDK Target versions independently,
 so the bump level is always about that target's own compatibility, never the API's.
 
+## Package metadata and changelog
+
+Once `decide-release` says an SDK Target should be released, a separate command writes the
+final package metadata and updates the changelog's compatibility table — see `CONTEXT.md` on
+Source API Version and `docs/adr/0001-sdk-versioning.md` on why SDK Releases version
+independently of API Releases.
+
+Package manifest fields are split in two:
+
+- **pipeline-owned** — package name, version, and Source API Version. Written every run,
+  regardless of what `openapi-generator` put there.
+- **hand-owned** — author, licence, repository, and keywords. Read from
+  `manifests/<target>/package.metadata.json` (tracked in this repository, outside `generated/`,
+  so `openapi-generator` never touches it) and written back untouched, replacing whatever
+  placeholder `openapi-generator` emitted.
+
+```bash
+npm run write-package-metadata -- \
+  --target ts \
+  --manifest generated/ts/package.json \
+  --hand-owned-metadata manifests/ts/package.metadata.json \
+  --changelog generated/ts/CHANGELOG.md \
+  --source-api-version v0.9.3 \
+  --previous-version 1.2.0 \
+  --bump minor
+```
+
+`--previous-version`/`--bump` (typically `decide-release`'s verdict) derive the next version;
+pass `--version` directly instead if the version is already known. The package name follows one
+convention across every SDK Target, `jsonhub-sdk-<target>` (e.g. `jsonhub-sdk-ts`), so the SDK
+Targets stay a recognisable family across registries. Source API Version is written as a plain
+`sourceApiVersion` field in the manifest, so it can be read programmatically without consulting
+the changelog.
+
+The same command appends a row to the generated compatibility table in `--changelog` (creating
+the file if it doesn't exist yet), between `<!-- compatibility-table:start -->` and
+`<!-- compatibility-table:end -->` markers so any hand-written changelog content around it is
+left alone. Regenerating with the same SDK Release version replaces that row instead of
+duplicating it.
+
+The unified naming convention and the pipeline/hand-owned split are implemented in
+`src/package-metadata.mjs`, and the compatibility table in `src/changelog.mjs` — both are pure
+functions, tested independently of file I/O; `src/write-package-metadata.mjs` is the thin CLI
+wrapper that reads and writes the actual files.
+
+This currently covers only the `ts` target: `src/cli.mjs` can generate `js`/`python`/`php`
+output too, but `PACKAGE_NAME_BY_TARGET` in `src/package-metadata.mjs` and
+`manifests/ts/package.metadata.json` exist only for `ts`, since it's the only SDK Target this
+repository holds hand-owned metadata for today. Adding a target here means adding its entry to
+`PACKAGE_NAME_BY_TARGET` and a matching `manifests/<target>/package.metadata.json` — `php` stays
+excluded, since it isn't an SDK Target (see `CONTEXT.md`).
+
 ## Example next steps
 
 What's usually worth adding next:

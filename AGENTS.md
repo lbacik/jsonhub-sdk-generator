@@ -107,3 +107,10 @@ Exception: `src/normalizer.mjs` deliberately hardcodes the media type selection 
 (the Canonical Client Spec, see `CONTEXT.md`). This is a deliberate domain decision — one
 shared policy instead of a configurable flag, so the SDK Targets can no longer drift apart
 — not an abandonment of the rule above.
+
+Exception: `src/package-metadata.mjs` deliberately hardcodes the unified `jsonhub-sdk-<target>`
+package naming convention and the split between pipeline-owned and hand-owned manifest fields
+(see `CONTEXT.md` and the "Package metadata and changelog" section of `README.md`). Same
+reasoning as the exception above — this is a one-time domain decision, not per-invocation
+configuration. The hand-owned fields themselves live outside `src/`, in `manifests/<target>/`,
+since they are owned by a human, not by this module.
