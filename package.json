@@ -1,0 +1,22 @@
+{
+  "name": "jh-client-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI do generowania SDK z OpenAPI po URL dla JS/TS, Python i PHP.",
+  "bin": {
+    "jh-client-generator": "./src/cli.mjs"
+  },
+  "scripts": {
+    "generate": "node ./src/cli.mjs",
+    "help": "node ./src/cli.mjs --help",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "dependencies": {
+    "@openapitools/openapi-generator-cli": "^2.22.0",
+    "commander": "^14.0.0"
+  }
+}
