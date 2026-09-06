@@ -5,7 +5,9 @@ import {
   unifiedPackageName,
   applyBump,
   buildPackageManifest,
-  HAND_OWNED_FIELDS
+  buildPoetryManifest,
+  HAND_OWNED_FIELDS,
+  POETRY_HAND_OWNED_FIELDS
 } from "../src/package-metadata.mjs";
 
 const handOwnedMetadata = {
@@ -35,10 +37,11 @@ const generatedManifest = {
 
 test("unifiedPackageName follows the jsonhub-sdk-<target> convention", () => {
   assert.equal(unifiedPackageName("ts"), "jsonhub-sdk-ts");
+  assert.equal(unifiedPackageName("python"), "jsonhub-sdk-python");
 });
 
 test("unifiedPackageName rejects a target with no naming convention yet", () => {
-  assert.throws(() => unifiedPackageName("python"), /python/);
+  assert.throws(() => unifiedPackageName("php"), /php/);
 });
 
 test("applyBump bumps patch without touching major/minor", () => {
@@ -146,4 +149,118 @@ test("buildPackageManifest is idempotent: regenerating twice with unchanged inpu
   });
 
   assert.equal(JSON.stringify(first), JSON.stringify(second));
+});
+
+const poetryHandOwnedMetadata = {
+  authors: ["Łukasz Bacik <mail@luka.sh>"],
+  license: "MIT",
+  repository: "https://github.com/lbacik/jsonhub-sdk-python",
+  keywords: ["jsonhub", "sdk", "openapi", "python", "api-client"]
+};
+
+const generatedPoetryManifest = {
+  tool: {
+    poetry: {
+      name: "jsonhub_sdk_python",
+      version: "0.1.0",
+      description: "A client library for accessing JsonHub API",
+      authors: [],
+      readme: "README.md",
+      packages: [{ include: "jsonhub_sdk_python" }]
+    }
+  }
+};
+
+test("buildPoetryManifest writes the pipeline-owned fields under [tool.poetry]", () => {
+  const manifest = buildPoetryManifest({
+    target: "python",
+    generatedManifest: generatedPoetryManifest,
+    handOwnedMetadata: poetryHandOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.equal(manifest.tool.poetry.name, "jsonhub-sdk-python");
+  assert.equal(manifest.tool.poetry.version, "1.3.0");
+  assert.equal(manifest.tool.jsonhub.source_api_version, "v0.9.3");
+});
+
+// Poetry validates [tool.poetry] against its own schema and hard-fails
+// `poetry check`/`poetry build` on any key it doesn't recognise - verified
+// directly against `poetry check` during this ticket's work. Source API
+// Version must therefore never land there.
+test("buildPoetryManifest keeps Source API Version out of [tool.poetry], which Poetry validates strictly", () => {
+  const manifest = buildPoetryManifest({
+    target: "python",
+    generatedManifest: generatedPoetryManifest,
+    handOwnedMetadata: poetryHandOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.equal("source_api_version" in manifest.tool.poetry, false);
+  assert.equal("sourceApiVersion" in manifest.tool.poetry, false);
+});
+
+test("buildPoetryManifest overwrites hand-owned fields with the maintained values", () => {
+  const manifest = buildPoetryManifest({
+    target: "python",
+    generatedManifest: generatedPoetryManifest,
+    handOwnedMetadata: poetryHandOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.deepEqual(manifest.tool.poetry.authors, poetryHandOwnedMetadata.authors);
+  assert.equal(manifest.tool.poetry.license, poetryHandOwnedMetadata.license);
+  assert.equal(manifest.tool.poetry.repository, poetryHandOwnedMetadata.repository);
+  assert.deepEqual(manifest.tool.poetry.keywords, poetryHandOwnedMetadata.keywords);
+  assert.notDeepEqual(manifest.tool.poetry.authors, []);
+});
+
+test("buildPoetryManifest leaves generator-owned fields untouched", () => {
+  const manifest = buildPoetryManifest({
+    target: "python",
+    generatedManifest: generatedPoetryManifest,
+    handOwnedMetadata: poetryHandOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.equal(manifest.tool.poetry.description, generatedPoetryManifest.tool.poetry.description);
+  assert.equal(manifest.tool.poetry.readme, generatedPoetryManifest.tool.poetry.readme);
+  assert.deepEqual(manifest.tool.poetry.packages, generatedPoetryManifest.tool.poetry.packages);
+});
+
+test("buildPoetryManifest rejects hand-owned metadata missing a required field", () => {
+  for (const missingField of POETRY_HAND_OWNED_FIELDS) {
+    const incomplete = { ...poetryHandOwnedMetadata };
+    delete incomplete[missingField];
+
+    assert.throws(
+      () =>
+        buildPoetryManifest({
+          target: "python",
+          generatedManifest: generatedPoetryManifest,
+          handOwnedMetadata: incomplete,
+          version: "1.3.0",
+          sourceApiVersion: "v0.9.3"
+        }),
+      new RegExp(missingField)
+    );
+  }
+});
+
+test("buildPoetryManifest rejects a generated manifest with no [tool.poetry] table", () => {
+  assert.throws(
+    () =>
+      buildPoetryManifest({
+        target: "python",
+        generatedManifest: {},
+        handOwnedMetadata: poetryHandOwnedMetadata,
+        version: "1.3.0",
+        sourceApiVersion: "v0.9.3"
+      }),
+    /\[tool\.poetry\]/
+  );
 });

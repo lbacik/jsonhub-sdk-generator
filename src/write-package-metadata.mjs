@@ -11,11 +11,19 @@
 
 import { Command } from "commander";
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { extname, resolve } from "node:path";
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
-import { applyBump, buildPackageManifest } from "./package-metadata.mjs";
+import { applyBump, buildPackageManifest, buildPoetryManifest } from "./package-metadata.mjs";
 import { upsertCompatibilityTable } from "./changelog.mjs";
 import { readJsonFile, runIfMain } from "./cli-utils.mjs";
+
+// The manifest format is read from --manifest's own extension rather than a
+// second target->format map: pyproject.toml (python) is TOML, every other
+// manifest this pipeline writes (package.json for ts/js) is JSON.
+function isTomlManifest(manifestPath) {
+  return extname(manifestPath) === ".toml";
+}
 
 async function readChangelog(filePath) {
   try {
@@ -34,15 +42,17 @@ function today() {
 }
 
 async function run(options) {
+  const toml = isTomlManifest(options.manifest);
   const [generatedManifest, handOwnedMetadata, changelogContent] = await Promise.all([
-    readJsonFile(options.manifest),
+    toml ? parseToml(await readFile(options.manifest, "utf8")) : readJsonFile(options.manifest),
     readJsonFile(options.handOwnedMetadata),
     readChangelog(options.changelog)
   ]);
 
   const version = options.version ?? applyBump(options.previousVersion, options.bump);
+  const build = toml ? buildPoetryManifest : buildPackageManifest;
 
-  const manifest = buildPackageManifest({
+  const manifest = build({
     target: options.target,
     generatedManifest,
     handOwnedMetadata,
@@ -56,10 +66,12 @@ async function run(options) {
     date: options.date ?? today()
   });
 
-  await writeFile(options.manifest, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const serializedManifest = toml ? stringifyToml(manifest) : `${JSON.stringify(manifest, null, 2)}\n`;
+
+  await writeFile(options.manifest, serializedManifest, "utf8");
   await writeFile(options.changelog, nextChangelog, "utf8");
 
-  return { manifest, changelogPath: options.changelog };
+  return { manifest, version, changelogPath: options.changelog };
 }
 
 const program = new Command();
@@ -101,7 +113,7 @@ program
     }
 
     const result = await run(options);
-    console.log(`Wrote ${options.manifest} (version ${result.manifest.version}).`);
+    console.log(`Wrote ${options.manifest} (version ${result.version}).`);
     console.log(`Updated the compatibility table in ${result.changelogPath}.`);
   });
 

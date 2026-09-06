@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@openapitools/openapi-generator-cli": "^2.22.0",
-    "commander": "^14.0.0"
+    "commander": "^14.0.0",
+    "smol-toml": "^1.8.0"
   }
 }

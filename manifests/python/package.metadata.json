@@ -1,0 +1,6 @@
+{
+  "authors": ["Łukasz Bacik <mail@luka.sh>"],
+  "license": "MIT",
+  "repository": "https://github.com/lbacik/jsonhub-sdk-python",
+  "keywords": ["jsonhub", "sdk", "openapi", "python", "api-client"]
+}

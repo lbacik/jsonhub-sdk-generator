@@ -24,13 +24,16 @@ The main logic lives in:
 
 - `src/cli.mjs`
 
-The end-to-end release pipeline for the `ts` SDK Target builds on top of it:
-`scripts/release-ts.sh` orchestrates `src/cli.mjs`, `src/decide-release.mjs`, and
-`src/write-package-metadata.mjs` in sequence, then commits and tags the result into the SDK
-Target's own repository; `.github/workflows/release-ts.yml` runs it on a manual trigger. See the
-"Releasing the TypeScript SDK Target" and "Publishing the TypeScript SDK Release to npm" sections
-of `README.md`, and `CONTEXT.md`, for the full pipeline including the separate npm-publish workflow
-living in the `jsonhub-sdk-ts` repository itself.
+The end-to-end release pipeline builds on top of it, one per SDK Target (`ts` and `python`):
+`scripts/release-ts.sh`/`scripts/release-python.sh` each set `TARGET` and delegate to the same
+`scripts/generate-and-decide.sh` and `scripts/publish-to-target.sh`, which orchestrate
+`src/cli.mjs`, `src/decide-release.mjs`, and `src/write-package-metadata.mjs` in sequence, then
+commit and tag the result into the SDK Target's own repository; `.github/workflows/release-ts.yml`
+and `.github/workflows/release-python.yml` each run their own on a manual trigger or an
+`api-release` `repository_dispatch` event. See the "Releasing the TypeScript/Python SDK Target"
+and "Publishing the TypeScript/Python SDK Release to npm/PyPI" sections of `README.md`, and
+`CONTEXT.md`, for the full pipeline including the separate registry-publish workflow living in
+each SDK Target's own repository (`jsonhub-sdk-ts`, `jsonhub-sdk-python`).
 
 Architectural assumption:
 

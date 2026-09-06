@@ -315,10 +315,17 @@ npm run write-package-metadata -- \
 
 `--previous-version`/`--bump` (typically `decide-release`'s verdict) derive the next version;
 pass `--version` directly instead if the version is already known. The package name follows one
-convention across every SDK Target, `jsonhub-sdk-<target>` (e.g. `jsonhub-sdk-ts`), so the SDK
-Targets stay a recognisable family across registries. Source API Version is written as a plain
-`sourceApiVersion` field in the manifest, so it can be read programmatically without consulting
-the changelog.
+convention across every SDK Target, `jsonhub-sdk-<target>` (e.g. `jsonhub-sdk-ts`,
+`jsonhub-sdk-python`), so the SDK Targets stay a recognisable family across registries.
+
+The manifest format is inferred from `--manifest`'s own extension: a `.json` manifest
+(`package.json`, for `ts`/`js`) is treated as npm-style, and Source API Version is written as a
+plain `sourceApiVersion` field so it can be read programmatically without consulting the
+changelog. A `.toml` manifest (`pyproject.toml`, for `python`) is treated as Poetry-style: hand-owned
+fields use Poetry's own names (`authors` instead of `author`, `repository` as a plain URL string
+instead of an object), and Source API Version is written to its own `[tool.jsonhub]` table rather
+than into `[tool.poetry]` — Poetry validates `[tool.poetry]` against a fixed schema and hard-fails
+`poetry check`/`poetry build` on any key it doesn't recognise, so a custom field can't live there.
 
 The same command appends a row to the generated compatibility table in `--changelog` (creating
 the file if it doesn't exist yet), between `<!-- compatibility-table:start -->` and
@@ -327,14 +334,16 @@ left alone. Regenerating with the same SDK Release version replaces that row ins
 duplicating it.
 
 The unified naming convention and the pipeline/hand-owned split are implemented in
-`src/package-metadata.mjs`, and the compatibility table in `src/changelog.mjs` — both are pure
+`src/package-metadata.mjs` (`buildPackageManifest` for npm-style manifests, `buildPoetryManifest`
+for Poetry-style ones), and the compatibility table in `src/changelog.mjs` — both are pure
 functions, tested independently of file I/O; `src/write-package-metadata.mjs` is the thin CLI
-wrapper that reads and writes the actual files.
+wrapper that reads and writes the actual files, picking the manifest format and builder function
+from `--manifest`'s extension.
 
-This currently covers only the `ts` target: `src/cli.mjs` can generate `js`/`python`/`php`
-output too, but `PACKAGE_NAME_BY_TARGET` in `src/package-metadata.mjs` and
-`manifests/ts/package.metadata.json` exist only for `ts`, since it's the only SDK Target this
-repository holds hand-owned metadata for today. Adding a target here means adding its entry to
+This covers the `ts` and `python` targets: `src/cli.mjs` can generate `js`/`php` output too, but
+`PACKAGE_NAME_BY_TARGET` in `src/package-metadata.mjs` and `manifests/<target>/package.metadata.json`
+exist only for `ts` and `python`, since those are the only SDK Targets this repository holds
+hand-owned metadata for today. Adding a target here means adding its entry to
 `PACKAGE_NAME_BY_TARGET` and a matching `manifests/<target>/package.metadata.json` — `php` stays
 excluded, since it isn't an SDK Target (see `CONTEXT.md`).
 
@@ -380,8 +389,10 @@ to do anything:
 Manual triggering (`workflow_dispatch`) keeps working exactly as before, for regenerating without
 waiting on an API Release.
 
-Only the `ts` SDK Target reacts to this event today; the `python` SDK Target's own release
-workflow will listen for the same `api-release` event once it exists.
+Both the `ts` and `python` SDK Targets react to this event: `release-ts.yml` and
+`release-python.yml` each declare their own `repository_dispatch` trigger, so one API Release
+notification fires both workflows independently — one SDK Target's run never blocks or depends on
+the other's.
 
 ## Releasing the TypeScript SDK Target
 
@@ -442,10 +453,11 @@ Two prerequisites are operational, not code, and gate every real run:
 
 ## Reporting pipeline failures
 
-`release-ts.yml` runs unattended, so a break must surface somewhere a human will actually look
-rather than only in workflow-run history. Two `if: failure()` / `if: success()` steps at the end
-of the job handle this against a single label, `pipeline-failure`, and a per-target issue title
-(`Release pipeline failure: ts SDK Target`):
+Both `release-ts.yml` and `release-python.yml` run unattended, so a break must surface somewhere a
+human will actually look rather than only in workflow-run history. Two `if: failure()` /
+`if: success()` steps at the end of each job handle this against a single label,
+`pipeline-failure`, and a per-target issue title (`Release pipeline failure: ts SDK Target` /
+`Release pipeline failure: python SDK Target`):
 
 - **On failure**, they look up the current run's jobs via the Actions API to name the step that
   failed, then either open a new issue with that detail and the failed run's link, or — if an
@@ -456,8 +468,10 @@ of the job handle this against a single label, `pipeline-failure`, and a per-tar
   closing comment linking the passing run and is closed.
 
 A run that legitimately releases nothing — an API Contract whose Canonical Client Spec digest is
-unchanged — exits `0` from `scripts/release-ts.sh` and is a normal success, not a failure, so it
-never opens an issue and closes one left open by an earlier break.
+unchanged — exits `0` from `scripts/release-ts.sh`/`scripts/release-python.sh` and is a normal
+success, not a failure, so it never opens an issue and closes one left open by an earlier break.
+The two SDK Targets keep separate issues (one per title), so a break in one never masks or closes
+out a break in the other.
 
 ## Publishing the TypeScript SDK Release to npm
 
@@ -484,6 +498,76 @@ you configure a trusted publisher for a package that already exists:
 2. On the package's settings page on npmjs.com, add a Trusted Publisher: provider GitHub Actions,
    organization/user `lbacik`, repository `jsonhub-sdk-ts`, workflow filename `publish.yml`.
 3. Every tag pushed after that publishes through the workflow with no credential to rotate or leak.
+
+## Releasing the Python SDK Target
+
+`.github/workflows/release-python.yml` runs the same end-to-end path for the `python` SDK
+Target, triggered by hand (`workflow_dispatch`) or by the same `api-release` event `release-ts.yml`
+reacts to: it fetches the API Contract from the live API, generates the `python` SDK Surface,
+decides whether and how much to release, writes the package metadata, and — only if the SDK
+Surface actually changed — commits and tags the result into the
+[`jsonhub-sdk-python`](https://github.com/lbacik/jsonhub-sdk-python) repository. Nothing is
+published to PyPI yet; that is a later step. This mirrors "Releasing the TypeScript SDK Target"
+above — the two SDK Targets differ only in their generator and their registry — so see that
+section for how `generate-and-decide.sh`/`publish-to-target.sh` split the work; both scripts are
+shared between `release-ts.sh` and `release-python.sh`, branching only on the manifest file
+(`package.json` vs `pyproject.toml`) and the package name passed to the generator.
+
+The workflow itself checks out the two repositories, installs the Node dependencies this CLI needs
+plus, additionally, Poetry and the `python-adapter/` dependencies `openapi-python-client` needs;
+the pipeline steps run in `scripts/release-python.sh`, which you can also run locally:
+
+```bash
+GENERATOR_DIR=$(pwd) \
+TARGET_DIR=/path/to/a/checkout/of/jsonhub-sdk-python \
+API_URL=https://example.com/openapi.json \
+SOURCE_API_VERSION=v0.9.3 \
+  ./scripts/release-python.sh
+```
+
+Set `SKIP_PUSH=1` to commit and tag `TARGET_DIR` locally without pushing — useful for a dry run
+against a scratch clone.
+
+Two prerequisites are operational, not code, and gate every real run — the same shape as `ts`'s:
+
+- a `JSONHUB_SDK_PYTHON_TOKEN` repository secret: a PAT with push access to `jsonhub-sdk-python`,
+  used to check it out and to push the release commit and tag;
+- a live API Contract URL, passed as the `api_url` workflow input or set once as the
+  `JSONHUB_API_URL` repository variable (shared with the `ts` workflow — both SDK Targets are
+  generated from the same API Contract).
+
+## Publishing the Python SDK Release to PyPI
+
+Publishing to a registry happens outside this repository, in
+[`jsonhub-sdk-python`](https://github.com/lbacik/jsonhub-sdk-python) itself: its own
+`.github/workflows/publish.yml` reacts to the `v<version>` tag `publish-to-target.sh` just pushed,
+verifies the tag/version/Source API Version agree (`.github/scripts/verify_package_metadata.py`),
+builds and smoke-tests the package (`.github/scripts/smoke_test.py` — builds the wheel, installs
+it into a scratch virtualenv, and imports it from there), and only then publishes. A broken SDK
+Release can't be unpublished cleanly, so a failing build or smoke test blocks publication outright
+— this mirrors "Publishing the TypeScript SDK Release to npm" above exactly.
+
+It authenticates via PyPI's [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC),
+the same mechanism as npm's: `id-token: write` lets `pypa/gh-action-pypi-publish` exchange a GitHub
+Actions OIDC token for a short-lived publish token, so no long-lived registry credential lives in
+either repository at all. It also means `scripts/publish-to-target.sh` must never wipe
+`jsonhub-sdk-python`'s `.github` directory: that workflow is hand-maintained infrastructure, not
+part of the generated SDK Surface, and would otherwise be deleted by the very next release.
+
+Trusted Publishing needs a one-time, manual setup on pypi.org — unlike npm, PyPI lets you configure
+a trusted publisher **before** the project exists ("pending" publishers), so no manual first
+publish is needed:
+
+1. On [pypi.org](https://pypi.org/manage/account/publishing/), add a pending Trusted Publisher:
+   PyPI project name `jsonhub-sdk-python`, owner `lbacik`, repository `jsonhub-sdk-python`,
+   workflow filename `publish.yml`.
+2. The first tag pushed after that claims the project name and publishes through the workflow,
+   with no credential to rotate or leak from then on.
+
+Source API Version is recorded in `pyproject.toml`'s `[tool.jsonhub]` table rather than
+`[tool.poetry]` (see "Package metadata and changelog" above), so it does not appear in the built
+wheel's standard metadata the way `ts`'s `sourceApiVersion` appears in its published `package.json` —
+`pyproject.toml` itself ships in the sdist, and is this SDK Target's package-metadata record of it.
 
 ## Example next steps
 

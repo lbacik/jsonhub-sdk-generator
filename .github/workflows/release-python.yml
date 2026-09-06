@@ -1,0 +1,215 @@
+name: Release Python SDK
+
+# The end-to-end pipeline run for the python SDK Target: fetch the live API
+# Contract, reduce it to a Canonical Client Spec, generate the SDK Surface,
+# decide whether and how much to release, write package metadata, then commit
+# and tag into the jsonhub-sdk-python repository. Nothing is published to
+# PyPI here - see CONTEXT.md and the parent design (issue #1) for the full
+# pipeline. Mirrors release-ts.yml; the two SDK Targets differ only in their
+# code generator and their registry.
+#
+# Two ways in:
+#   - workflow_dispatch, triggered by hand, for regenerating on demand;
+#   - repository_dispatch (event_type "api-release"), sent by the API
+#     repository after a successful deploy - the same event release-ts.yml
+#     reacts to, so one API Release notification triggers both SDK Targets'
+#     workflows independently. That call is fire-and-forget by construction:
+#     the dispatches endpoint returns as soon as the event is accepted,
+#     before this workflow even starts, so nothing that happens in this run
+#     can block or fail the API's own deploy. See the "Triggering the
+#     pipeline from an API Release" section of README.md for the payload
+#     shape and the credential the API repository needs to send it.
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: >-
+          URL of the live API Contract (OpenAPI JSON). Leave empty to use the
+          JSONHUB_API_URL repository variable.
+        required: false
+        type: string
+      source_api_version:
+        description: "API Release this run generates the SDK Surface from, e.g. v0.9.3"
+        required: true
+        type: string
+  repository_dispatch:
+    types: [api-release]
+
+# Never run two releases of the same SDK Target at once - both would read the
+# same "previous" state in jsonhub-sdk-python and race to push.
+concurrency:
+  group: release-python
+  cancel-in-progress: false
+
+# issues:write and actions:read are for the failure-reporting steps at the end
+# of the job (see README's "Reporting pipeline failures"); contents:read is
+# all checking out this repository itself needs - the push to
+# jsonhub-sdk-python goes through JSONHUB_SDK_PYTHON_TOKEN, not this token.
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out jh-client-generator
+        uses: actions/checkout@v4
+        with:
+          path: generator
+
+      - name: Check out jsonhub-sdk-python
+        uses: actions/checkout@v4
+        with:
+          repository: lbacik/jsonhub-sdk-python
+          token: ${{ secrets.JSONHUB_SDK_PYTHON_TOKEN }}
+          path: target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # openapi-python-client (the python SDK Target's own generator, wrapped
+      # by generator/python-adapter/) runs on its own Python/Poetry toolchain,
+      # separate from the Node one orchestrating this pipeline - see AGENTS.md
+      # and the "Python SDK Target" section of README.md.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install generator dependencies
+        working-directory: generator
+        run: npm ci
+
+      - name: Install python-adapter dependencies
+        working-directory: generator/python-adapter
+        run: poetry install
+
+      # repository_dispatch carries its inputs in client_payload rather than
+      # inputs, and source_api_version is the one input this workflow cannot
+      # default: without it the release commit and tag would carry the wrong
+      # Source API Version, silently.
+      - name: Require a Source API Version
+        if: github.event_name == 'repository_dispatch' && !github.event.client_payload.source_api_version
+        run: |
+          echo "::error::repository_dispatch payload is missing client_payload.source_api_version"
+          exit 1
+
+      # scripts/release-python.sh runs the full path end to end via two
+      # single-purpose scripts (fetch/generate/decide, then publish - see
+      # AGENTS.md on not mixing the two), running three change detectors in
+      # sequence, allowed to disagree - see CONTEXT.md and
+      # src/release-decision.mjs for why there are three and not one:
+      #   1. a Canonical Client Spec digest, a cheap filter that stops the
+      #      run before the SDK Surface is generated at all;
+      #   2. a generated SDK Surface comparison, deciding *whether* to release;
+      #   3. a structured Canonical Client Spec comparison, deciding *how
+      #      much* to bump.
+      # An unchanged API Contract leaves jsonhub-sdk-python untouched: no
+      # commit, no tag, no push.
+      - name: Run the release pipeline
+        env:
+          GENERATOR_DIR: ${{ github.workspace }}/generator
+          TARGET_DIR: ${{ github.workspace }}/target
+          API_URL: >-
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.api_url)
+             || (github.event_name == 'repository_dispatch' && github.event.client_payload.api_url)
+             || vars.JSONHUB_API_URL }}
+          SOURCE_API_VERSION: >-
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.source_api_version)
+             || (github.event_name == 'repository_dispatch' && github.event.client_payload.source_api_version) }}
+        run: generator/scripts/release-python.sh
+
+      # This pipeline runs unattended, so a break must surface somewhere a
+      # human will actually look rather than only in workflow-run history.
+      # Repeated failures update the one open issue instead of piling up a
+      # new one per run; a run that later succeeds closes it again. See
+      # README's "Reporting pipeline failures" for the full behaviour. A run
+      # that legitimately releases nothing (e.g. an unchanged API Contract)
+      # is not a failure - it exits 0 above and never reaches this step.
+      - name: Report a pipeline failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = 'python'
+            const label = 'pipeline-failure'
+            const title = `Release pipeline failure: ${target} SDK Target`
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+
+            const { data: runJobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            })
+            const job = runJobs.jobs.find((j) => j.name === context.job) ?? runJobs.jobs[0]
+            const failedStep = job?.steps?.find((s) => s.conclusion === 'failure')
+            const failedStepName = failedStep ? failedStep.name : 'an unknown step'
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            })
+            const existing = openIssues.find((i) => i.title === title)
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Failed again at **${failedStepName}**, triggered by \`${context.eventName}\`. See the [failed run](${runUrl}).`,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels: [label],
+                body: [
+                  `The **${title}** run failed at step **${failedStepName}**.`,
+                  '',
+                  `Triggered by \`${context.eventName}\`. See the [failed run](${runUrl}) for logs.`,
+                  '',
+                  'This issue stays open and accumulates a comment per failed run until a run succeeds, which closes it automatically.',
+                ].join('\n'),
+              })
+            }
+
+      - name: Resolve an open pipeline-failure issue
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = 'python'
+            const label = 'pipeline-failure'
+            const title = `Release pipeline failure: ${target} SDK Target`
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            })
+            const existing = openIssues.find((i) => i.title === title)
+            if (!existing) return
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: existing.number,
+              body: `Resolved by the [passing run](${runUrl}).`,
+            })
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: existing.number,
+              state: 'closed',
+              state_reason: 'completed',
+            })
