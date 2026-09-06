@@ -440,6 +440,25 @@ Two prerequisites are operational, not code, and gate every real run:
 - a live API Contract URL, passed as the `api_url` workflow input or set once as the
   `JSONHUB_API_URL` repository variable.
 
+## Reporting pipeline failures
+
+`release-ts.yml` runs unattended, so a break must surface somewhere a human will actually look
+rather than only in workflow-run history. Two `if: failure()` / `if: success()` steps at the end
+of the job handle this against a single label, `pipeline-failure`, and a per-target issue title
+(`Release pipeline failure: ts SDK Target`):
+
+- **On failure**, they look up the current run's jobs via the Actions API to name the step that
+  failed, then either open a new issue with that detail and the failed run's link, or — if an
+  open issue with that exact title already exists — add a comment to it instead of opening a
+  second one. A persistent break therefore accumulates comments on one issue rather than flooding
+  the tracker with a new one per run.
+- **On success**, the same lookup runs the other way: an open issue with that title gets a
+  closing comment linking the passing run and is closed.
+
+A run that legitimately releases nothing — an API Contract whose Canonical Client Spec digest is
+unchanged — exits `0` from `scripts/release-ts.sh` and is a normal success, not a failure, so it
+never opens an issue and closes one left open by an earlier break.
+
 ## Publishing the TypeScript SDK Release to npm
 
 Publishing to a registry happens outside this repository, in

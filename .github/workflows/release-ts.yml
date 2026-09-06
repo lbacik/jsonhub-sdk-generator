@@ -37,6 +37,15 @@ concurrency:
   group: release-ts
   cancel-in-progress: false
 
+# issues:write and actions:read are for the failure-reporting steps at the end
+# of the job (see README's "Reporting pipeline failures"); contents:read is
+# all checking out this repository itself needs - the push to jsonhub-sdk-ts
+# goes through JSONHUB_SDK_TS_TOKEN, not this token.
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -101,3 +110,93 @@ jobs:
             ${{ (github.event_name == 'workflow_dispatch' && inputs.source_api_version)
              || (github.event_name == 'repository_dispatch' && github.event.client_payload.source_api_version) }}
         run: generator/scripts/release-ts.sh
+
+      # This pipeline runs unattended, so a break must surface somewhere a
+      # human will actually look rather than only in workflow-run history.
+      # Repeated failures update the one open issue instead of piling up a
+      # new one per run; a run that later succeeds closes it again. See
+      # README's "Reporting pipeline failures" for the full behaviour. A run
+      # that legitimately releases nothing (e.g. an unchanged API Contract)
+      # is not a failure - it exits 0 above and never reaches this step.
+      - name: Report a pipeline failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = 'ts'
+            const label = 'pipeline-failure'
+            const title = `Release pipeline failure: ${target} SDK Target`
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+
+            const { data: runJobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            })
+            const job = runJobs.jobs.find((j) => j.name === context.job) ?? runJobs.jobs[0]
+            const failedStep = job?.steps?.find((s) => s.conclusion === 'failure')
+            const failedStepName = failedStep ? failedStep.name : 'an unknown step'
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            })
+            const existing = openIssues.find((i) => i.title === title)
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Failed again at **${failedStepName}**, triggered by \`${context.eventName}\`. See the [failed run](${runUrl}).`,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels: [label],
+                body: [
+                  `The **${title}** run failed at step **${failedStepName}**.`,
+                  '',
+                  `Triggered by \`${context.eventName}\`. See the [failed run](${runUrl}) for logs.`,
+                  '',
+                  'This issue stays open and accumulates a comment per failed run until a run succeeds, which closes it automatically.',
+                ].join('\n'),
+              })
+            }
+
+      - name: Resolve an open pipeline-failure issue
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = 'ts'
+            const label = 'pipeline-failure'
+            const title = `Release pipeline failure: ${target} SDK Target`
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            })
+            const existing = openIssues.find((i) => i.title === title)
+            if (!existing) return
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: existing.number,
+              body: `Resolved by the [passing run](${runUrl}).`,
+            })
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: existing.number,
+              state: 'closed',
+              state_reason: 'completed',
+            })
