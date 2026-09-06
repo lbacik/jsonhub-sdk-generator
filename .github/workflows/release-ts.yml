@@ -1,13 +1,20 @@
 name: Release TypeScript SDK
 
-# The first end-to-end pipeline run for the ts SDK Target: fetch the live API
+# The end-to-end pipeline run for the ts SDK Target: fetch the live API
 # Contract, reduce it to a Canonical Client Spec, generate the SDK Surface,
 # decide whether and how much to release, write package metadata, then commit
 # and tag into the jsonhub-sdk-ts repository. Nothing is published to npm
 # here - see CONTEXT.md and the parent design (issue #1) for the full pipeline.
 #
-# Triggered by hand only, for now: the notification from the API repository
-# after a deploy is a later addition, not part of this first run.
+# Two ways in:
+#   - workflow_dispatch, triggered by hand, for regenerating on demand;
+#   - repository_dispatch (event_type "api-release"), sent by the API
+#     repository after a successful deploy. That call is fire-and-forget by
+#     construction: the dispatches endpoint returns as soon as the event is
+#     accepted, before this workflow even starts, so nothing that happens in
+#     this run can block or fail the API's own deploy. See the "Triggering
+#     the pipeline from an API Release" section of README.md for the payload
+#     shape and the credential the API repository needs to send it.
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +28,8 @@ on:
         description: "API Release this run generates the SDK Surface from, e.g. v0.9.3"
         required: true
         type: string
+  repository_dispatch:
+    types: [api-release]
 
 # Never run two releases of the same SDK Target at once - both would read the
 # same "previous" state in jsonhub-sdk-ts and race to push.
@@ -58,6 +67,16 @@ jobs:
         working-directory: generator
         run: npm ci
 
+      # repository_dispatch carries its inputs in client_payload rather than
+      # inputs, and source_api_version is the one input this workflow cannot
+      # default: without it the release commit and tag would carry the wrong
+      # Source API Version, silently.
+      - name: Require a Source API Version
+        if: github.event_name == 'repository_dispatch' && !github.event.client_payload.source_api_version
+        run: |
+          echo "::error::repository_dispatch payload is missing client_payload.source_api_version"
+          exit 1
+
       # scripts/release-ts.sh runs the full path end to end via two
       # single-purpose scripts (fetch/generate/decide, then publish - see
       # AGENTS.md on not mixing the two), running three change detectors in
@@ -74,6 +93,11 @@ jobs:
         env:
           GENERATOR_DIR: ${{ github.workspace }}/generator
           TARGET_DIR: ${{ github.workspace }}/target
-          API_URL: ${{ inputs.api_url || vars.JSONHUB_API_URL }}
-          SOURCE_API_VERSION: ${{ inputs.source_api_version }}
+          API_URL: >-
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.api_url)
+             || (github.event_name == 'repository_dispatch' && github.event.client_payload.api_url)
+             || vars.JSONHUB_API_URL }}
+          SOURCE_API_VERSION: >-
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.source_api_version)
+             || (github.event_name == 'repository_dispatch' && github.event.client_payload.source_api_version) }}
         run: generator/scripts/release-ts.sh

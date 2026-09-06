@@ -338,6 +338,51 @@ repository holds hand-owned metadata for today. Adding a target here means addin
 `PACKAGE_NAME_BY_TARGET` and a matching `manifests/<target>/package.metadata.json` — `php` stays
 excluded, since it isn't an SDK Target (see `CONTEXT.md`).
 
+## Triggering the pipeline from an API Release
+
+The JsonHub API repository notifies this one after a successful deploy, so tagging an API
+Release is the only action its maintainer takes — the SDK pipeline runs on its own from there.
+It sends a [`repository_dispatch`](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#repository_dispatch)
+event of type `api-release`:
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer $JH_CLIENT_GENERATOR_DISPATCH_TOKEN" \
+  https://api.github.com/repos/lbacik/jh-client-generator/dispatches \
+  -d '{"event_type":"api-release","client_payload":{"source_api_version":"v0.9.4"}}'
+```
+
+`client_payload.source_api_version` is required — it becomes the SDK Release's recorded Source
+API Version, the same input `workflow_dispatch`'s `source_api_version` provides for a manual run.
+`client_payload.api_url` is optional, same as the manual trigger's `api_url` input: omit it to use
+the `JSONHUB_API_URL` repository variable.
+
+This is **fire-and-forget by construction**, not by convention: the `dispatches` endpoint accepts
+the event and returns before `release-ts.yml` even starts, so nothing that happens in this
+repository — a slow run, a failed generation, this repository being unreachable — can block or
+fail the API's own deploy. The API repository should still call it the way any fire-and-forget
+step is called: don't retry in a loop that could itself delay the deploy, and don't fail the
+deploy job if the request errors.
+
+Sending the event needs a credential held in the **API repository**, scoped to dispatching into
+this one — provisioning it is operational setup, not code, and is a prerequisite for this trigger
+to do anything:
+
+1. Create a fine-grained personal access token scoped only to the `jh-client-generator`
+   repository, with repository permission **Contents: Read and write** — the minimum GitHub
+   requires for the `dispatches` endpoint, and it grants nothing else (no push access, no access
+   to any other repository).
+2. Store it as a secret in the **API repository** (not here) — for example
+   `JH_CLIENT_GENERATOR_DISPATCH_TOKEN` — and send it as the `Authorization: Bearer` header above
+   from the API repository's own deploy workflow.
+
+Manual triggering (`workflow_dispatch`) keeps working exactly as before, for regenerating without
+waiting on an API Release.
+
+Only the `ts` SDK Target reacts to this event today; the `python` SDK Target's own release
+workflow will listen for the same `api-release` event once it exists.
+
 ## Releasing the TypeScript SDK Target
 
 `.github/workflows/release-ts.yml` runs the full path end to end, triggered by hand
