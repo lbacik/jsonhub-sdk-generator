@@ -1,0 +1,219 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "JsonHub API",
+    "version": "0.9.3"
+  },
+  "paths": {
+    "/api/definitions": {
+      "get": {
+        "operationId": "listDefinitions",
+        "responses": {
+          "200": {
+            "description": "Collection",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionCollection"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDefinition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Definition"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Definition.jsonhal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/definitions/{id}": {
+      "get": {
+        "operationId": "getDefinition",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Definition",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Definition.jsonhal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchDefinition",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefinitionPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Definition.jsonhal"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Definition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Definition.jsonhal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "_links": {
+            "type": "object"
+          }
+        }
+      },
+      "DefinitionPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "DefinitionCollection": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/HalCollectionBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "_embedded": {
+                "type": "object",
+                "properties": {
+                  "item": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Definition.jsonhal"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "HalCollectionBase": {
+        "type": "object",
+        "properties": {
+          "totalItems": {
+            "type": "integer"
+          },
+          "itemsPerPage": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "_links": {
+            "type": "object"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

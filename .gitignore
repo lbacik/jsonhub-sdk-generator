@@ -2,3 +2,5 @@ node_modules/
 dist/
 .cache/
 generated/
+python-adapter/.venv/
+python-adapter/**/__pycache__/

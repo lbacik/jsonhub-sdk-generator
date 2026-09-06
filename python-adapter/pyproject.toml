@@ -1,0 +1,13 @@
+[tool.poetry]
+name = "python-adapter"
+version = "0.1.0"
+description = "Thin adapter invoking openapi-python-client on the Canonical Client Spec produced by src/normalizer.mjs."
+authors = ["Łukasz Bacik <mail@luka.sh>"]
+
+[tool.poetry.dependencies]
+python = "^3.13"
+openapi-python-client = "0.26.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
