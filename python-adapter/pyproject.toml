@@ -3,6 +3,7 @@ name = "python-adapter"
 version = "0.1.0"
 description = "Thin adapter invoking openapi-python-client on the Canonical Client Spec produced by src/normalizer.mjs."
 authors = ["Łukasz Bacik <mail@luka.sh>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.13"
