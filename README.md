@@ -501,16 +501,35 @@ and would otherwise be deleted by the very next release.
 Trusted Publishing needs a one-time, manual setup on npmjs.com, since npm (unlike PyPI) only lets
 you configure a trusted publisher for a package that already exists:
 
-1. Publish `jsonhub-sdk@<first version>` once by hand (`npm publish` from a local checkout,
-   logged in as a maintainer) to claim the package name.
+1. Claim the package name with one manual publish from a local checkout of `jsonhub-sdk-ts`.
+   `npm publish` takes no package name — its optional argument is a *folder or tarball path*, and
+   the name published is always `package.json`'s own `name` field, so publish by being in the
+   right directory:
+
+   ```bash
+   cd /path/to/a/checkout/of/jsonhub-sdk-ts
+   npm whoami                # must print your npm username, not 401
+   npm pkg get name version  # must print "jsonhub-sdk", not "jsonhub-sdk-ts"
+   npm publish --dry-run     # check what would ship, then drop --dry-run
+   ```
+
+   `npm whoami` first because npm answers an unauthenticated `npm publish` with
+   `404 Not Found - PUT .../jsonhub-sdk`, not a 401: it will not confirm whether a package exists
+   to a caller who isn't allowed to see it, so a stale `_authToken` in `~/.npmrc` looks exactly
+   like a missing package. `npm login` if `whoami` fails.
 2. On the package's settings page on npmjs.com, add a Trusted Publisher: provider GitHub Actions,
    organization/user `lbacik`, repository `jsonhub-sdk-ts`, workflow filename `publish.yml`.
 3. Every tag pushed after that publishes through the workflow with no credential to rotate or leak.
 
-The `jsonhub-sdk-ts` package published before the rename to `jsonhub-sdk` (see "Package metadata
-and changelog" above) stays on npm — npm keeps published versions forever. Retire it with
-`npm deprecate jsonhub-sdk-ts "renamed to jsonhub-sdk"` rather than unpublishing it, so anyone
-still installing the old name is told where the package went.
+Step 1 is chicken-and-egg across the rename to `jsonhub-sdk` (see "Package metadata and changelog"
+above): the checkout's `package.json` only carries the new name once a release run has regenerated
+it, but that run publishes through Trusted Publishing, which needs the package to exist already.
+Edit `name` by hand in the checkout for that one manual publish — the next release overwrites
+`package.json` wholesale, so the edit neither needs committing nor survives.
+
+The `jsonhub-sdk-ts` package published before the rename stays on npm — npm keeps published
+versions forever. Retire it with `npm deprecate jsonhub-sdk-ts "renamed to jsonhub-sdk"` rather
+than unpublishing it, so anyone still installing the old name is told where the package went.
 
 ## Releasing the Python SDK Target
 
