@@ -314,9 +314,17 @@ npm run write-package-metadata -- \
 ```
 
 `--previous-version`/`--bump` (typically `decide-release`'s verdict) derive the next version;
-pass `--version` directly instead if the version is already known. The package name follows one
-convention across every SDK Target, `jsonhub-sdk-<target>` (e.g. `jsonhub-sdk-ts`,
-`jsonhub-sdk-python`), so the SDK Targets stay a recognisable family across registries.
+pass `--version` directly instead if the version is already known. Every SDK Target publishes
+under the same package name, `jsonhub-sdk` — `jsonhub-sdk` on npm, `jsonhub-sdk` on PyPI — so the
+SDK Targets stay a recognisable family across registries. The language suffix belongs to the
+*repository* name (`jsonhub-sdk-ts`, `jsonhub-sdk-python`) and not to the package name: a GitHub
+organisation is one flat, language-agnostic namespace and needs the suffix to tell the
+repositories apart, whereas a registry is already the namespace for its own language, so `-ts` on
+npm or `-python` on PyPI would only repeat what the registry already says. This matches how the
+SDKs of Stripe, OpenAI, Twilio and others are named.
+
+For `python` that also fixes the import site: the PyPI distribution `jsonhub-sdk` installs the
+`jsonhub_sdk` module, so users write `import jsonhub_sdk` rather than `import jsonhub_sdk_python`.
 
 The manifest format is inferred from `--manifest`'s own extension: a `.json` manifest
 (`package.json`, for `ts`/`js`) is treated as npm-style, and Source API Version is written as a
@@ -333,7 +341,7 @@ the file if it doesn't exist yet), between `<!-- compatibility-table:start -->` 
 left alone. Regenerating with the same SDK Release version replaces that row instead of
 duplicating it.
 
-The unified naming convention and the pipeline/hand-owned split are implemented in
+The unified package name and the pipeline/hand-owned split are implemented in
 `src/package-metadata.mjs` (`buildPackageManifest` for npm-style manifests, `buildPoetryManifest`
 for Poetry-style ones), and the compatibility table in `src/changelog.mjs` — both are pure
 functions, tested independently of file I/O; `src/write-package-metadata.mjs` is the thin CLI
@@ -493,11 +501,16 @@ and would otherwise be deleted by the very next release.
 Trusted Publishing needs a one-time, manual setup on npmjs.com, since npm (unlike PyPI) only lets
 you configure a trusted publisher for a package that already exists:
 
-1. Publish `jsonhub-sdk-ts@<first version>` once by hand (`npm publish` from a local checkout,
+1. Publish `jsonhub-sdk@<first version>` once by hand (`npm publish` from a local checkout,
    logged in as a maintainer) to claim the package name.
 2. On the package's settings page on npmjs.com, add a Trusted Publisher: provider GitHub Actions,
    organization/user `lbacik`, repository `jsonhub-sdk-ts`, workflow filename `publish.yml`.
 3. Every tag pushed after that publishes through the workflow with no credential to rotate or leak.
+
+The `jsonhub-sdk-ts` package published before the rename to `jsonhub-sdk` (see "Package metadata
+and changelog" above) stays on npm — npm keeps published versions forever. Retire it with
+`npm deprecate jsonhub-sdk-ts "renamed to jsonhub-sdk"` rather than unpublishing it, so anyone
+still installing the old name is told where the package went.
 
 ## Releasing the Python SDK Target
 
@@ -511,7 +524,9 @@ published to PyPI yet; that is a later step. This mirrors "Releasing the TypeScr
 above — the two SDK Targets differ only in their generator and their registry — so see that
 section for how `generate-and-decide.sh`/`publish-to-target.sh` split the work; both scripts are
 shared between `release-ts.sh` and `release-python.sh`, branching only on the manifest file
-(`package.json` vs `pyproject.toml`) and the package name passed to the generator.
+(`package.json` vs `pyproject.toml`) and how to read a version out of it. The package name passed
+to the generator is not one of those branches: both targets pass `jsonhub-sdk`, and `src/cli.mjs`
+underscores it for `python`.
 
 The workflow itself checks out the two repositories, installs the Node dependencies this CLI needs
 plus, additionally, Poetry and the `python-adapter/` dependencies `openapi-python-client` needs;
@@ -559,10 +574,17 @@ a trusted publisher **before** the project exists ("pending" publishers), so no 
 publish is needed:
 
 1. On [pypi.org](https://pypi.org/manage/account/publishing/), add a pending Trusted Publisher:
-   PyPI project name `jsonhub-sdk-python`, owner `lbacik`, repository `jsonhub-sdk-python`,
+   PyPI project name `jsonhub-sdk`, owner `lbacik`, repository `jsonhub-sdk-python`,
    workflow filename `publish.yml`.
 2. The first tag pushed after that claims the project name and publishes through the workflow,
    with no credential to rotate or leak from then on.
+
+A trusted publisher is bound to the PyPI *project name*, so the rename to `jsonhub-sdk` (see
+"Package metadata and changelog" above) needs step 1 done again for the new name — the publisher
+registered against `jsonhub-sdk-python` does not carry over. The old project stays on PyPI, which
+never releases a claimed name: retire it by releasing one final `jsonhub-sdk-python` version that
+only depends on `jsonhub-sdk`, so an existing `pip install jsonhub-sdk-python` still resolves to
+the maintained package.
 
 Source API Version is recorded in `pyproject.toml`'s `[tool.jsonhub]` table rather than
 `[tool.poetry]` (see "Package metadata and changelog" above), so it does not appear in the built

@@ -4,9 +4,14 @@
  * (author, licence, repository, keywords) - see CONTEXT.md and the Package
  * metadata section of README.md.
  *
- * The unified `jsonhub-sdk-<target>` naming convention is a deliberate,
- * one-time domain decision (see AGENTS.md's exception for this module),
- * mirroring the exception already made for src/normalizer.mjs.
+ * The unified `jsonhub-sdk` package name is a deliberate, one-time domain
+ * decision (see AGENTS.md's exception for this module), mirroring the
+ * exception already made for src/normalizer.mjs. The language suffix belongs
+ * to the repository name (`jsonhub-sdk-ts`, `jsonhub-sdk-python`) and not to
+ * the package name: a GitHub organisation is one flat, language-agnostic
+ * namespace and needs the suffix to tell the repositories apart, whereas a
+ * registry is already the namespace for its own language, so `-ts`/`-python`
+ * there would only repeat what npm and PyPI already say.
  *
  * This module is a pure transformation: it takes the manifest openapi-generator
  * just wrote plus the hand-owned metadata already on disk, and returns the
@@ -23,9 +28,16 @@
 // One entry per SDK Target this repository actually generates and maintains
 // hand-owned metadata for - see manifests/<target>/. Add a target here only
 // once it has a manifests/<target>/package.metadata.json to go with it.
+//
+// Every entry spells the same name on purpose (see the module comment above):
+// the registry carries the language, the package name doesn't. This stays a
+// map rather than collapsing to a constant so that a target whose ecosystem
+// forces a different spelling - an npm scope like `@jsonhub/sdk`, say - has
+// somewhere to say so, and so an unregistered target still fails loudly in
+// unifiedPackageName instead of silently inheriting a name.
 const PACKAGE_NAME_BY_TARGET = {
-  ts: "jsonhub-sdk-ts",
-  python: "jsonhub-sdk-python"
+  ts: "jsonhub-sdk",
+  python: "jsonhub-sdk"
 };
 
 const HAND_OWNED_FIELDS = Object.freeze(["author", "license", "repository", "keywords"]);

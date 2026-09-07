@@ -32,9 +32,12 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-jsonhub-sdk-generator[bot]@users.noreply.githu
 source "$GENERATOR_DIR/scripts/lib.sh"
 
 # See scripts/generate-and-decide.sh for what each target config means.
-# TARGET_REPO_NAME is the unified jsonhub-sdk-<target> name (src/package-metadata.mjs's
-# PACKAGE_NAME_BY_TARGET) used in the release commit message and log line -
-# TARGET_DIR itself is just a local checkout path (e.g. "target"), not that name.
+# TARGET_REPO_NAME is the SDK Target's GitHub repository name, used in the
+# release commit message and log line - TARGET_DIR itself is just a local
+# checkout path (e.g. "target"), not that name. It is deliberately not the
+# published package name (both targets publish as "jsonhub-sdk", see
+# src/package-metadata.mjs): a GitHub organisation is one flat namespace, so
+# the repositories - unlike the packages - need the language suffix.
 case "$TARGET" in
   ts)
     MANIFEST_FILE="package.json"

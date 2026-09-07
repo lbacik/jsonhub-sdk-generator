@@ -26,25 +26,29 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$GENERATOR_DIR/scripts/lib.sh"
 
+# The unified package name every SDK Target publishes under, and so the same
+# string for every target - src/package-metadata.mjs owns that convention and
+# writes it into the final manifest; the language suffix belongs to the
+# repository name, not to the package name. Not per-target because src/cli.mjs
+# already underscores it for python (a Python module name can't contain
+# hyphens), so python generates the jsonhub_sdk module and
+# write-package-metadata.mjs then overwrites [tool.poetry].name with the
+# hyphenated "jsonhub-sdk" PyPI distribution name - see CONTEXT.md and the
+# "Package metadata and changelog" section of README.md.
+CLI_PACKAGE_NAME="jsonhub-sdk"
+
 # The one place this script (and publish-to-target.sh) branches per SDK
-# Target: the manifest file each ecosystem's generator writes, the package
-# name passed to the generator, and how to read that manifest's version
-# field. Add a target here only once src/package-metadata.mjs's
-# PACKAGE_NAME_BY_TARGET and manifests/<target>/package.metadata.json also
-# know about it.
+# Target: the manifest file each ecosystem's generator writes, and how to read
+# that manifest's version field. Add a target here only once
+# src/package-metadata.mjs's PACKAGE_NAME_BY_TARGET and
+# manifests/<target>/package.metadata.json also know about it.
 case "$TARGET" in
   ts)
     MANIFEST_FILE="package.json"
-    CLI_PACKAGE_NAME="jsonhub-sdk-ts"
     read_version() { json_field "$1" version; }
     ;;
   python)
     MANIFEST_FILE="pyproject.toml"
-    # Poetry's own project name must be a valid Python identifier (no
-    # hyphens); write-package-metadata.mjs overwrites [tool.poetry].name to
-    # the hyphenated "jsonhub-sdk-python" PyPI distribution name afterwards -
-    # see CONTEXT.md and the "Package metadata" section of README.md.
-    CLI_PACKAGE_NAME="jsonhub_sdk_python"
     read_version() { toml_field "$1" tool.poetry.version; }
     ;;
   *)

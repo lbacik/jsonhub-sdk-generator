@@ -35,9 +35,12 @@ const generatedManifest = {
   devDependencies: { typescript: "^4.0 || ^5.0" }
 };
 
-test("unifiedPackageName follows the jsonhub-sdk-<target> convention", () => {
-  assert.equal(unifiedPackageName("ts"), "jsonhub-sdk-ts");
-  assert.equal(unifiedPackageName("python"), "jsonhub-sdk-python");
+// The language suffix lives in the repository name, never in the package name:
+// a registry is already the namespace for its own language, so every SDK
+// Target publishes under one name.
+test("unifiedPackageName is the same registry-agnostic jsonhub-sdk for every SDK Target", () => {
+  assert.equal(unifiedPackageName("ts"), "jsonhub-sdk");
+  assert.equal(unifiedPackageName("python"), "jsonhub-sdk");
 });
 
 test("unifiedPackageName rejects a target with no naming convention yet", () => {
@@ -73,7 +76,7 @@ test("buildPackageManifest writes the pipeline-owned fields", () => {
     sourceApiVersion: "v0.9.3"
   });
 
-  assert.equal(manifest.name, "jsonhub-sdk-ts");
+  assert.equal(manifest.name, "jsonhub-sdk");
   assert.equal(manifest.version, "1.3.0");
   assert.equal(manifest.sourceApiVersion, "v0.9.3");
 });
@@ -158,15 +161,18 @@ const poetryHandOwnedMetadata = {
   keywords: ["jsonhub", "sdk", "openapi", "python", "api-client"]
 };
 
+// openapi-python-client writes the underscored module name here (a Python
+// module name can't contain hyphens); buildPoetryManifest replaces it with the
+// hyphenated PyPI distribution name and leaves `packages` alone.
 const generatedPoetryManifest = {
   tool: {
     poetry: {
-      name: "jsonhub_sdk_python",
+      name: "jsonhub_sdk",
       version: "0.1.0",
       description: "A client library for accessing JsonHub API",
       authors: [],
       readme: "README.md",
-      packages: [{ include: "jsonhub_sdk_python" }]
+      packages: [{ include: "jsonhub_sdk" }]
     }
   }
 };
@@ -180,7 +186,7 @@ test("buildPoetryManifest writes the pipeline-owned fields under [tool.poetry]",
     sourceApiVersion: "v0.9.3"
   });
 
-  assert.equal(manifest.tool.poetry.name, "jsonhub-sdk-python");
+  assert.equal(manifest.tool.poetry.name, "jsonhub-sdk");
   assert.equal(manifest.tool.poetry.version, "1.3.0");
   assert.equal(manifest.tool.jsonhub.source_api_version, "v0.9.3");
 });
