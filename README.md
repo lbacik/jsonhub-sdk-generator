@@ -281,10 +281,44 @@ otherwise                            -> patch
 ```
 
 The decision itself (`decideRelease` in `src/release-decision.mjs`) is a pure function of the
-previous/current Canonical Client Spec, the previous/current SDK Surface, and the toolchain
-version — it performs no I/O and never releases anything on its own. Per this repository's
-[SDK versioning ADR](docs/adr/0001-sdk-versioning.md), each SDK Target versions independently,
-so the bump level is always about that target's own compatibility, never the API's.
+previous/current Canonical Client Spec, the previous/current SDK Surface, the toolchain
+version, and `--force` — it performs no I/O and never releases anything on its own. Per this
+repository's [SDK versioning ADR](docs/adr/0001-sdk-versioning.md), each SDK Target versions
+independently, so the bump level is always about that target's own compatibility, never the
+API's.
+
+### Forcing a release
+
+All three detectors watch the API Contract, the generated SDK Surface, and the toolchain pin —
+and nothing else. The pipeline-owned package metadata (`src/package-metadata.mjs`: the package
+name, the npm tarball's `files` allowlist) and the hand-owned metadata in
+`manifests/<target>/` are applied afterwards, by `src/write-package-metadata.mjs`, and only
+once the verdict already says to release. A change confined to those is therefore invisible
+here: it cannot trigger a release of its own, and sits unreleased until some future API Release
+happens to carry it along.
+
+`--force` (`FORCE_RELEASE=1` for the scripts, the `force` input on the release workflows) is
+the escape hatch. It overrides the two no-release verdicts and nothing else:
+
+```json
+{
+  "shouldRelease": true,
+  "bump": "patch",
+  "reason": "forced",
+  "breakingChanges": [],
+  "additiveChanges": []
+}
+```
+
+The bump level is still classified from the same Canonical Client Spec comparison, so a forced
+run with no structural API change is a `patch`, and one that coincides with a breaking change
+is still a `major` — `force` is not a way to hand-pick a bump level. A forced run also still
+regenerates: it releases a freshly generated SDK Surface, never a bare re-tag. When the
+detectors would have released anyway, `reason` stays `sdk-surface-changed`.
+
+`force` is offered on `workflow_dispatch` only, not on the `api-release` `repository_dispatch`
+— an API Release always has a real change behind it, so honouring a force there would just
+re-release an unchanged SDK Target on every API deploy.
 
 ## Package metadata and changelog
 
@@ -435,7 +469,9 @@ SOURCE_API_VERSION=v0.9.3 \
 ```
 
 Set `SKIP_PUSH=1` to commit and tag `TARGET_DIR` locally without pushing — useful for a dry run
-against a scratch clone.
+against a scratch clone. Set `FORCE_RELEASE=1` to release even though nothing the detectors
+watch has changed — see ["Forcing a release"](#forcing-a-release) for when that is the only way
+to roll a change out, and the `force` input for the same thing from the workflow.
 
 `release-ts.sh` is a thin wrapper over two single-purpose scripts, kept apart per this
 repository's own rule against mixing spec-fetching logic with package-publishing logic in one
@@ -571,7 +607,9 @@ SOURCE_API_VERSION=v0.9.3 \
 ```
 
 Set `SKIP_PUSH=1` to commit and tag `TARGET_DIR` locally without pushing — useful for a dry run
-against a scratch clone.
+against a scratch clone. Set `FORCE_RELEASE=1` to release even though nothing the detectors
+watch has changed — see ["Forcing a release"](#forcing-a-release) for when that is the only way
+to roll a change out, and the `force` input for the same thing from the workflow.
 
 Two prerequisites are operational, not code, and gate every real run — the same shape as `ts`'s:
 

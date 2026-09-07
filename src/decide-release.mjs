@@ -52,7 +52,8 @@ async function run(options) {
     currentSdkSurface,
     previousToolchainVersion: options.previousToolchainVersion,
     currentToolchainVersion: options.currentToolchainVersion,
-    versionBearingFilePaths: options.versionBearingFile
+    versionBearingFilePaths: options.versionBearingFile,
+    force: Boolean(options.force)
   });
 }
 
@@ -92,6 +93,10 @@ program
     "SDK Surface file (relative to --previous-surface/--current-surface) to exclude from comparison, e.g. package.json. Repeatable.",
     collect,
     []
+  )
+  .option(
+    "--force",
+    "Release even when the Canonical Client Spec and the SDK Surface are unchanged, for rolling out a generator-side metadata change the detectors cannot see. Does not choose the bump level - that is still classified from the spec comparison."
   )
   .action(async (options) => {
     const verdict = await run(options);

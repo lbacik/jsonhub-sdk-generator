@@ -32,6 +32,18 @@ on:
         description: "API Release this run generates the SDK Surface from, e.g. v0.9.3"
         required: true
         type: string
+      force:
+        description: >-
+          Release even though the API Contract and the generated SDK Surface
+          are unchanged. For rolling out a generator-side change the three
+          detectors cannot see - the package name, the npm tarball's file
+          allowlist, the hand-owned metadata in manifests/ - which would
+          otherwise sit unreleased until some future API Release happened to
+          carry it along. It does not pick the bump level: with no structural
+          API change, a forced run is a patch.
+        required: false
+        default: false
+        type: boolean
   repository_dispatch:
     types: [api-release]
 
@@ -122,6 +134,11 @@ jobs:
           SOURCE_API_VERSION: >-
             ${{ (github.event_name == 'workflow_dispatch' && inputs.source_api_version)
              || (github.event_name == 'repository_dispatch' && github.event.client_payload.source_api_version) }}
+          # workflow_dispatch only, deliberately: an api-release dispatch
+          # always has a real API change behind it, so honouring a force there
+          # would just mean re-releasing an unchanged SDK Target on every API
+          # deploy.
+          FORCE_RELEASE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '1' || '0' }}
         run: generator/scripts/release-python.sh
 
       # This pipeline runs unattended, so a break must surface somewhere a

@@ -261,6 +261,50 @@ const cases = [
       currentSdkSurface: { ...BASE_SURFACE, "package.json": '{"name":"sdk","version":"1.0.1"}' }
     },
     expected: { shouldRelease: false, bump: null, reason: "sdk-surface-unchanged" }
+  },
+  // force exists because none of the three detectors can see a change
+  // confined to src/package-metadata.mjs or manifests/<target>/ - those are
+  // applied by src/write-package-metadata.mjs, after this verdict.
+  {
+    name: "force releases an otherwise unchanged SDK Target as a patch",
+    overrides: { force: true },
+    expected: { shouldRelease: true, bump: "patch", reason: "forced" }
+  },
+  {
+    name: "force releases a changed spec that left the SDK Surface unchanged",
+    overrides: { force: true, currentCanonicalClientSpec: ADDED_OPTIONAL_FIELD_SPEC },
+    expected: { shouldRelease: true, bump: "minor", reason: "forced" }
+  },
+  // force overrides the no-release verdicts, not the bump classification.
+  {
+    name: "force does not soften a breaking change to a patch",
+    overrides: {
+      force: true,
+      currentCanonicalClientSpec: REMOVED_OPERATION_SPEC,
+      currentSdkSurface: CHANGED_SURFACE
+    },
+    expected: { shouldRelease: true, bump: "major", reason: "sdk-surface-changed" }
+  },
+  {
+    name: "force still respects the toolchain version's minor floor",
+    overrides: { force: true, currentToolchainVersion: "openapi-generator@7.2.0" },
+    expected: { shouldRelease: true, bump: "minor", reason: "forced" }
+  },
+  // A forced run that coincides with a real API change is not "forced": the
+  // detectors would have released it anyway, and the reason should say so.
+  {
+    name: "force leaves the reason alone when the detectors would have released regardless",
+    overrides: {
+      force: true,
+      currentCanonicalClientSpec: ADDED_OPERATION_SPEC,
+      currentSdkSurface: CHANGED_SURFACE
+    },
+    expected: { shouldRelease: true, bump: "minor", reason: "sdk-surface-changed" }
+  },
+  {
+    name: "force defaults to off, so an unchanged SDK Target still releases nothing",
+    overrides: { force: undefined },
+    expected: { shouldRelease: false, bump: null, reason: "canonical-client-spec-unchanged" }
   }
 ];
 
@@ -275,6 +319,16 @@ for (const { name, overrides, expected } of cases) {
     }
   });
 }
+
+// A forced run reports no changes because there genuinely are none - the
+// verdict must not invent entries to justify itself.
+test("a forced release with nothing changed reports no breaking or additive changes", () => {
+  const verdict = decide({ force: true });
+
+  assert.equal(verdict.shouldRelease, true);
+  assert.deepEqual(verdict.breakingChanges, []);
+  assert.deepEqual(verdict.additiveChanges, []);
+});
 
 test("decideRelease is a pure function - repeated calls with the same input return the same verdict", () => {
   const input = {

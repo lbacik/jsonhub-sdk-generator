@@ -18,6 +18,14 @@
  *        generator or toolchain version moved -> minor floor
  *        otherwise                            -> patch
  *
+ * All three detectors look at the API Contract, the generated SDK Surface,
+ * and the toolchain pin - never at the pipeline-owned package metadata
+ * (src/package-metadata.mjs) or the hand-owned metadata in
+ * manifests/<target>/, both of which are applied later, by
+ * src/write-package-metadata.mjs, and only once this verdict already says to
+ * release. A change confined to those therefore cannot trigger a release on
+ * its own; `force` is the deliberate escape hatch for rolling one out.
+ *
  * This module is a pure function of its inputs: no I/O, no network access,
  * no code generation. See docs/adr/0001-sdk-versioning.md for why the bump
  * level is derived this way rather than mirrored from the API version.
@@ -218,9 +226,16 @@ function noRelease(reason) {
 }
 
 // The release decision. A pure function of the previous and current
-// Canonical Client Spec, the previous and current SDK Surface, and the
-// toolchain version - see CONTEXT.md for why these three detectors exist and
-// are allowed to disagree.
+// Canonical Client Spec, the previous and current SDK Surface, the toolchain
+// version, and `force` - see CONTEXT.md for why these three detectors exist
+// and are allowed to disagree.
+//
+// `force` overrides the two no-release verdicts, and nothing else: the bump
+// level is still classified from the same comparison, so a forced run with
+// no structural change lands on a patch and a forced run that happens to
+// coincide with a breaking change still yields a major. It exists because
+// the detectors are blind to generator-side metadata changes (see the module
+// comment) - it is not a way to hand-pick a bump level.
 function decideRelease({
   previousCanonicalClientSpec,
   currentCanonicalClientSpec,
@@ -228,19 +243,35 @@ function decideRelease({
   currentSdkSurface,
   previousToolchainVersion,
   currentToolchainVersion,
-  versionBearingFilePaths = []
+  versionBearingFilePaths = [],
+  force = false
 }) {
   const canonicalClientSpecChanged =
     canonicalClientSpecDigest(previousCanonicalClientSpec) !==
     canonicalClientSpecDigest(currentCanonicalClientSpec);
   const toolchainVersionMoved = previousToolchainVersion !== currentToolchainVersion;
+  const sdkSurfaceChanged = hasSdkSurfaceChanged(
+    previousSdkSurface,
+    currentSdkSurface,
+    versionBearingFilePaths
+  );
 
-  if (!canonicalClientSpecChanged && !toolchainVersionMoved) {
-    return noRelease("canonical-client-spec-unchanged");
-  }
+  // What the detectors alone would have decided, kept separately from the
+  // forced outcome so `reason` can still say which of the two happened - a
+  // forced run that coincides with a real change is not "forced".
+  const detectorsWouldRelease =
+    (canonicalClientSpecChanged || toolchainVersionMoved) && sdkSurfaceChanged;
 
-  if (!hasSdkSurfaceChanged(previousSdkSurface, currentSdkSurface, versionBearingFilePaths)) {
-    return noRelease("sdk-surface-unchanged");
+  if (!detectorsWouldRelease && !force) {
+    // Detector 1 outranks detector 2 in the explanation as well as in the
+    // order they run: an unchanged Canonical Client Spec is why the run
+    // stopped, and it stops it before the SDK Surface is even generated (see
+    // scripts/generate-and-decide.sh's matching early exit).
+    return noRelease(
+      !canonicalClientSpecChanged && !toolchainVersionMoved
+        ? "canonical-client-spec-unchanged"
+        : "sdk-surface-unchanged"
+    );
   }
 
   const comparison = compareCanonicalClientSpecs(
@@ -254,7 +285,7 @@ function decideRelease({
   return {
     shouldRelease: true,
     bump,
-    reason: "sdk-surface-changed",
+    reason: detectorsWouldRelease ? "sdk-surface-changed" : "forced",
     breakingChanges: comparison.breaking,
     additiveChanges: comparison.additive
   };

@@ -31,7 +31,12 @@ _Avoid_: language, platform, client type
 
 **SDK Surface**:
 The generated code an SDK Target exposes to its consumers. A change to the SDK
-Surface is the only thing that requires publishing a new SDK Release.
+Surface is the only thing the release decision watches for, and so the only
+thing that triggers an SDK Release on its own. It is not the only thing that
+can warrant one: the package metadata the pipeline owns (the package name, the
+published file allowlist) sits outside the SDK Surface and is applied only once
+a release is already happening, so rolling such a change out takes a forced
+release - see "Forcing a release" in `README.md`.
 _Avoid_: generated code, client API
 
 **SDK Release**:

@@ -12,6 +12,21 @@ set -euo pipefail
 # Required environment variables: GENERATOR_DIR, TARGET_DIR (read-only here),
 # TARGET (ts | python), API_URL, WORK_DIR.
 #
+# Optional environment variables:
+#   FORCE_RELEASE   when "1", release even though the API Contract and the
+#                   generated SDK Surface are unchanged. The three detectors
+#                   only ever look at the API Contract, the SDK Surface and
+#                   the toolchain pin, so a change confined to the
+#                   pipeline-owned package metadata (src/package-metadata.mjs)
+#                   or the hand-owned metadata (manifests/<target>/) is
+#                   invisible to them and needs this to roll out. It skips the
+#                   early exit below so generation still happens - a forced
+#                   run releases a genuinely regenerated SDK Surface, not a
+#                   re-tag - and passes --force to decide-release.mjs. It does
+#                   not pick the bump level: that stays classified from the
+#                   Canonical Client Spec comparison, so a forced run with no
+#                   structural change is a patch.
+#
 # Writes $WORK_DIR/decision.json always. When it says shouldRelease, also
 # writes $WORK_DIR/current-surface/ (generated, not yet metadata-written),
 # $WORK_DIR/canonical-client-spec.json, $WORK_DIR/previous-version, and
@@ -133,7 +148,9 @@ echo "== Fetching the API Contract and reducing it to a Canonical Client Spec ==
 PREVIOUS_DIGEST="$(node "$GENERATOR_DIR/src/canonical-spec-digest.mjs" --canonical-client-spec "$PREVIOUS_SPEC")"
 CURRENT_DIGEST="$(node "$GENERATOR_DIR/src/canonical-spec-digest.mjs" --canonical-client-spec "$GENERATOR_DIR/.cache/canonical-client-spec.json")"
 
-if [ "$PREVIOUS_DIGEST" = "$CURRENT_DIGEST" ] && [ "$PREVIOUS_TOOLCHAIN_VERSION" = "$CURRENT_TOOLCHAIN_VERSION" ]; then
+if [ "${FORCE_RELEASE:-0}" != "1" ] &&
+  [ "$PREVIOUS_DIGEST" = "$CURRENT_DIGEST" ] &&
+  [ "$PREVIOUS_TOOLCHAIN_VERSION" = "$CURRENT_TOOLCHAIN_VERSION" ]; then
   cat > "$DECISION_FILE" <<JSON
 {
   "shouldRelease": false,
@@ -148,6 +165,13 @@ JSON
   exit 0
 fi
 
+if [ "${FORCE_RELEASE:-0}" = "1" ]; then
+  echo "== FORCE_RELEASE=1: releasing even if nothing the detectors watch has changed =="
+  FORCE_FLAG="--force"
+else
+  FORCE_FLAG=""
+fi
+
 echo "== Generating the $TARGET SDK Surface =="
 rm -rf "$CURRENT_SURFACE"
 (
@@ -160,7 +184,10 @@ rm -rf "$CURRENT_SURFACE"
 )
 
 echo "== Deciding whether and how much to release =="
+# ${FORCE_FLAG:+"$FORCE_FLAG"} rather than a bare "$FORCE_FLAG": the latter
+# would pass an empty argument on an unforced run, which commander rejects.
 node "$GENERATOR_DIR/src/decide-release.mjs" \
+  ${FORCE_FLAG:+"$FORCE_FLAG"} \
   --previous-canonical-client-spec "$PREVIOUS_SPEC" \
   --current-canonical-client-spec "$GENERATOR_DIR/.cache/canonical-client-spec.json" \
   --previous-surface "$PREVIOUS_SURFACE" \
