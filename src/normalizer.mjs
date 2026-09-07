@@ -15,6 +15,16 @@
  * dependency on the rest of this pipeline. That is deliberate - the policy is
  * a contract decision expected to move into the API repository later, and
  * this isolation is what makes that move a deletion rather than a rewrite.
+ *
+ * Alongside representation selection, this module also repairs `type: array`
+ * schemas the API Contract leaves without an `items`/`prefixItems` schema
+ * (the JsonHub API's generic HAL collection base schema does this for its
+ * `_embedded` property, since it doesn't know a collection's item type ahead
+ * of the per-operation override merged in over it) - such schemas are valid
+ * OpenAPI/JSON Schema, but unparseable by openapi-python-client. Filling
+ * `items: {}` (accept anything) keeps every SDK Target's generator able to
+ * process the Canonical Client Spec without hardcoding knowledge of any one
+ * schema.
  */
 
 const HTTP_METHODS = new Set([
@@ -211,6 +221,34 @@ function pruneUnreachableSchemas(document) {
   return document;
 }
 
+// A `type: array` schema with neither `items` nor `prefixItems` is valid
+// OpenAPI/JSON Schema (it places no constraint on element shape), but
+// openapi-python-client refuses to generate one ("type array must have items
+// or prefixItems defined"). Filling in a permissive `items: {}` preserves the
+// schema's meaning while making it something every SDK Target's generator can
+// process. Walks the whole document, not just components.schemas, since
+// array schemas can also appear inline.
+function fillMissingArrayItemSchemas(node) {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      fillMissingArrayItemSchemas(item);
+    }
+    return;
+  }
+
+  if (!isPlainObject(node)) {
+    return;
+  }
+
+  if (node.type === "array" && node.items === undefined && node.prefixItems === undefined) {
+    node.items = {};
+  }
+
+  for (const value of Object.values(node)) {
+    fillMissingArrayItemSchemas(value);
+  }
+}
+
 function reduceToCanonicalClientSpec(document) {
   const canonical = structuredClone(document);
 
@@ -228,7 +266,9 @@ function reduceToCanonicalClientSpec(document) {
     }
   }
 
-  return pruneUnreachableSchemas(canonical);
+  const pruned = pruneUnreachableSchemas(canonical);
+  fillMissingArrayItemSchemas(pruned);
+  return pruned;
 }
 
 export {
@@ -237,5 +277,6 @@ export {
   responseMediaTypePreference,
   reduceContentToSingleMediaType,
   pruneUnreachableSchemas,
+  fillMissingArrayItemSchemas,
   reduceToCanonicalClientSpec
 };

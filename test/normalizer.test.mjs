@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  fillMissingArrayItemSchemas,
   isErrorStatusCode,
   pruneUnreachableSchemas,
   reduceContentToSingleMediaType,
@@ -551,6 +552,79 @@ test("a response that is itself a $ref into components.responses still resolves 
     "application/problem+json"
   ]);
   assert.deepEqual(Object.keys(canonical.components.schemas), ["Error"]);
+});
+
+test("fillMissingArrayItemSchemas fills items:{} on arrays left without items or prefixItems", () => {
+  const node = { type: "array" };
+  fillMissingArrayItemSchemas(node);
+  assert.deepEqual(node, { type: "array", items: {} });
+});
+
+test("fillMissingArrayItemSchemas leaves arrays that already declare items or prefixItems alone", () => {
+  const withItems = { type: "array", items: { type: "string" } };
+  const withPrefixItems = { type: "array", prefixItems: [{ type: "string" }] };
+
+  fillMissingArrayItemSchemas(withItems);
+  fillMissingArrayItemSchemas(withPrefixItems);
+
+  assert.deepEqual(withItems, { type: "array", items: { type: "string" } });
+  assert.deepEqual(withPrefixItems, { type: "array", prefixItems: [{ type: "string" }] });
+});
+
+test("fillMissingArrayItemSchemas repairs arrays nested anywhere in the document, e.g. inside a union", () => {
+  const document = {
+    components: {
+      schemas: {
+        HalCollectionBaseSchemaNoPagination: {
+          properties: {
+            _embedded: {
+              anyOf: [{ type: "object", properties: { item: { type: "array" } } }, { type: "object" }]
+            }
+          }
+        }
+      }
+    }
+  };
+
+  fillMissingArrayItemSchemas(document);
+
+  assert.deepEqual(
+    document.components.schemas.HalCollectionBaseSchemaNoPagination.properties._embedded.anyOf[0]
+      .properties.item,
+    { type: "array", items: {} }
+  );
+});
+
+test("reduceToCanonicalClientSpec fills missing array items so openapi-python-client can process HAL collection base schemas", () => {
+  const spec = buildSpec({
+    paths: {
+      "/definitions": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/HalCollectionBaseSchema" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      HalCollectionBaseSchema: {
+        properties: {
+          _embedded: {
+            anyOf: [{ type: "object", properties: { item: { type: "array" } } }, { type: "object" }]
+          }
+        }
+      }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+  const embeddedSchema = canonical.components.schemas.HalCollectionBaseSchema.properties._embedded;
+
+  assert.deepEqual(embeddedSchema.anyOf[0].properties.item, { type: "array", items: {} });
 });
 
 test("reduceToCanonicalClientSpec is a pure transformation that does not mutate its input", () => {
