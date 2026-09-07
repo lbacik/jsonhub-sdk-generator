@@ -7,7 +7,8 @@ import {
   buildPackageManifest,
   buildPoetryManifest,
   HAND_OWNED_FIELDS,
-  POETRY_HAND_OWNED_FIELDS
+  POETRY_HAND_OWNED_FIELDS,
+  NPM_PUBLISHED_FILES
 } from "../src/package-metadata.mjs";
 
 const handOwnedMetadata = {
@@ -96,6 +97,50 @@ test("buildPackageManifest overwrites hand-owned fields with the maintained valu
   assert.deepEqual(manifest.keywords, handOwnedMetadata.keywords);
   assert.notEqual(manifest.author, "OpenAPI-Generator");
   assert.notEqual(manifest.repository.url, "https://github.com/GIT_USER_ID/GIT_REPO_ID.git");
+});
+
+// Without a `files` field npm packs everything not ignored, and
+// openapi-generator writes neither `files` nor a .npmignore - a publish then
+// ships .github/, .jsonhub/, docs/ and any editor leftovers, permanently,
+// since a published npm version can't be cleanly unpublished.
+test("buildPackageManifest confines the npm tarball to the built output", () => {
+  const manifest = buildPackageManifest({
+    target: "ts",
+    generatedManifest,
+    handOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.deepEqual(manifest.files, ["dist"]);
+});
+
+test("buildPackageManifest overrides a `files` field the generator put there", () => {
+  const manifest = buildPackageManifest({
+    target: "ts",
+    generatedManifest: { ...generatedManifest, files: ["dist", "src", ".jsonhub", ".idea"] },
+    handOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.deepEqual(manifest.files, ["dist"]);
+});
+
+// The returned manifest is about to be serialised and written out, so it must
+// not hand a caller the module's own frozen constant to mutate.
+test("buildPackageManifest returns a fresh `files` array, not the shared constant", () => {
+  const manifest = buildPackageManifest({
+    target: "ts",
+    generatedManifest,
+    handOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.notEqual(manifest.files, NPM_PUBLISHED_FILES);
+  manifest.files.push("src");
+  assert.deepEqual(NPM_PUBLISHED_FILES, ["dist"]);
 });
 
 test("buildPackageManifest leaves generator-owned fields untouched", () => {
@@ -206,6 +251,23 @@ test("buildPoetryManifest keeps Source API Version out of [tool.poetry], which P
 
   assert.equal("source_api_version" in manifest.tool.poetry, false);
   assert.equal("sourceApiVersion" in manifest.tool.poetry, false);
+});
+
+// `files` is npm's mechanism; a Poetry build's contents come from
+// [tool.poetry].packages instead, which openapi-python-client already scopes
+// to the generated module - and Poetry hard-fails on keys it doesn't
+// recognise under [tool.poetry] anyway.
+test("buildPoetryManifest adds no npm-style `files` field", () => {
+  const manifest = buildPoetryManifest({
+    target: "python",
+    generatedManifest: generatedPoetryManifest,
+    handOwnedMetadata: poetryHandOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.equal("files" in manifest.tool.poetry, false);
+  assert.equal("files" in manifest, false);
 });
 
 test("buildPoetryManifest overwrites hand-owned fields with the maintained values", () => {

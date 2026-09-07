@@ -295,8 +295,8 @@ independently of API Releases.
 
 Package manifest fields are split in two:
 
-- **pipeline-owned** — package name, version, and Source API Version. Written every run,
-  regardless of what `openapi-generator` put there.
+- **pipeline-owned** — package name, version, Source API Version, and (npm only) `files`. Written
+  every run, regardless of what `openapi-generator` put there.
 - **hand-owned** — author, licence, repository, and keywords. Read from
   `manifests/<target>/package.metadata.json` (tracked in this repository, outside `generated/`,
   so `openapi-generator` never touches it) and written back untouched, replacing whatever
@@ -334,6 +334,17 @@ fields use Poetry's own names (`authors` instead of `author`, `repository` as a 
 instead of an object), and Source API Version is written to its own `[tool.jsonhub]` table rather
 than into `[tool.poetry]` — Poetry validates `[tool.poetry]` against a fixed schema and hard-fails
 `poetry check`/`poetry build` on any key it doesn't recognise, so a custom field can't live there.
+
+An npm-style manifest also gets `files: ["dist"]` written every run. `openapi-generator` emits
+neither a `files` field nor a `.npmignore`, and npm's default is to pack everything not ignored,
+so without it a publish ships the whole repository — the SDK Surface, but also the hand-maintained
+`.github/` workflows, the `.jsonhub/` pipeline artifacts, `docs/`, and whatever an editor left
+behind (`.idea/workspace.xml`). A published npm version can't be cleanly unpublished, so that
+leak would be permanent. `dist` alone is the whole published package: `main` and `types` both
+point into it and the generator emits no sourcemaps, so the TypeScript sources would buy consumers
+nothing; npm force-includes `package.json`, `README` and `LICENSE` regardless of the list. There is
+no Poetry counterpart because a Poetry build's contents come from `[tool.poetry].packages`, which
+`openapi-python-client` already scopes to the generated module.
 
 The same command appends a row to the generated compatibility table in `--changelog` (creating
 the file if it doesn't exist yet), between `<!-- compatibility-table:start -->` and

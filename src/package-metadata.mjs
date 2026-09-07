@@ -40,6 +40,26 @@ const PACKAGE_NAME_BY_TARGET = {
   python: "jsonhub-sdk"
 };
 
+// What the npm tarball is allowed to ship - pipeline-owned, like the package
+// name, and for the same reason: it is a policy that must hold every run, not
+// a per-invocation preference. openapi-generator emits neither a `files` field
+// nor a .npmignore, and npm's default is "pack everything not ignored", so
+// without this a publish ships the whole repository: the SDK Surface, but also
+// .github/ (hand-maintained CI, see README.md), the .jsonhub/ pipeline
+// artifacts, docs/, and whatever an editor left behind (.idea/workspace.xml).
+// A published npm version cannot be cleanly unpublished, so leaking there is
+// permanent.
+//
+// `dist` alone is the whole published package: `main` and `types` both point
+// into it, and the generator emits no sourcemaps, so shipping the TypeScript
+// sources would buy consumers nothing. npm force-includes package.json,
+// README and LICENSE whatever this list says.
+//
+// npm-only, like sourceApiVersion: a Poetry build's contents come from
+// [tool.poetry].packages, which openapi-python-client already scopes to the
+// generated module, so buildPoetryManifest needs no counterpart.
+const NPM_PUBLISHED_FILES = Object.freeze(["dist"]);
+
 const HAND_OWNED_FIELDS = Object.freeze(["author", "license", "repository", "keywords"]);
 
 // Poetry's own field names for the same four hand-owned facts: authors is a
@@ -108,6 +128,9 @@ function buildPackageManifest({ target, generatedManifest, handOwnedMetadata, ve
     name: unifiedPackageName(target),
     version,
     sourceApiVersion,
+    // A fresh array per call: NPM_PUBLISHED_FILES itself is frozen, and the
+    // manifest this returns is about to be serialised and written out.
+    files: [...NPM_PUBLISHED_FILES],
     ...Object.fromEntries(HAND_OWNED_FIELDS.map((field) => [field, handOwnedMetadata[field]]))
   };
 }
@@ -157,6 +180,7 @@ function buildPoetryManifest({ target, generatedManifest, handOwnedMetadata, ver
 
 export {
   PACKAGE_NAME_BY_TARGET,
+  NPM_PUBLISHED_FILES,
   HAND_OWNED_FIELDS,
   POETRY_HAND_OWNED_FIELDS,
   unifiedPackageName,
