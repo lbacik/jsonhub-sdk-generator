@@ -140,3 +140,14 @@ entry point — `npm run generate -- --target python` is still how a caller invo
 `python` SDK Target's own generator, kept alongside the TypeScript one exactly as the "SDK Target"
 definition in `CONTEXT.md` describes. The adapter itself stays thin: it performs no representation
 selection, consuming the Canonical Client Spec `src/normalizer.mjs` already produced.
+
+Known gap: `src/normalizer.mjs`'s per-operation media-type selection only shapes which schema
+`openapi-python-client` generates a model from - it does not, and cannot, make the `python` target
+emit a matching per-operation `Accept` header. Unlike `openapi-generator-cli` (used for
+`ts`/`js`/`php`), `openapi-python-client` 0.26.2 never writes an `Accept` header into a generated
+operation's `_get_kwargs()`; it uses the response `content` entry only to pick the model class for
+parsing, so whatever `Accept` a Python SDK consumer sends is whichever value was set once as a
+client-level default downstream (in `jsonhub-sdk-python`/its consumers), not something driven by
+this repo's spec at all. Don't assume that reducing a response's media types in the Canonical
+Client Spec is sufficient to fix request-side content negotiation for the `python` target - see
+issue #14, closed on that assumption and reopened once this was found not to hold.
