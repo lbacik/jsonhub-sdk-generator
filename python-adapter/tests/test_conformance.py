@@ -80,6 +80,25 @@ class CanonicalClientSpecConformanceTests(unittest.TestCase):
                     if status.startswith(("4", "5")) and "content" in response:
                         self.assertEqual(list(response["content"]), [PROBLEM_JSON])
 
+    def test_single_entity_reads_use_plain_json_with_inlined_relations(self) -> None:
+        """Regression for issue #14: a single-resource GET must resolve to
+        `application/json`, not `application/hal+json`, when the generated
+        model expects relations (e.g. `definition`) as direct properties
+        rather than under HAL's `_links`/`_embedded`.
+        """
+
+        operation = self.spec["paths"]["/api/entities/{id}"]["get"]
+        response = operation["responses"]["200"]
+
+        self.assertEqual(list(response["content"]), ["application/json"])
+
+        schema = response["content"]["application/json"]["schema"]
+        properties = merged_properties(self.schemas, schema)
+
+        self.assertIn("definition", properties)
+        self.assertNotIn("_links", properties)
+        self.assertNotIn("_embedded", properties)
+
     def test_excludes_jsonld_and_duplicate_representation_schemas(self) -> None:
         self.assertFalse(any("jsonld" in name.lower() for name in self.schemas))
         self.assertNotIn("@", json.dumps(self.schemas))

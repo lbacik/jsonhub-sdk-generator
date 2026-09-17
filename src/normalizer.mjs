@@ -4,11 +4,20 @@
  * one shared policy instead of a single global "preferred media type" flag.
  *
  * Policy:
- *   response 2xx      -> application/hal+json, falling back to application/json
- *   response 4xx/5xx  -> application/problem+json
- *   request body      -> application/json
- *     PATCH           -> application/merge-patch+json
- *     OAuth forms      -> application/x-www-form-urlencoded
+ *   response 2xx (single-resource GET) -> application/json, falling back to application/hal+json
+ *   response 2xx (everything else)     -> application/hal+json, falling back to application/json
+ *   response 4xx/5xx                   -> application/problem+json
+ *   request body                       -> application/json
+ *     PATCH                            -> application/merge-patch+json
+ *     OAuth forms                      -> application/x-www-form-urlencoded
+ *
+ * A single-resource GET is a GET operation whose path ends in a path
+ * parameter (e.g. `/entities/{id}`), as opposed to a collection GET (e.g.
+ * `/entities`). JsonHub's HAL representation of a single resource carries its
+ * relations under `_links`/`_embedded` rather than as direct properties, so a
+ * generated model built from the direct (non-HAL) schema needs the plain
+ * `application/json` representation instead. Collection GETs still prefer
+ * `application/hal+json`, since pagination needs the HAL envelope.
  *
  * This module is a pure, standalone transformation: it takes a document and
  * returns a document, with no network access, no code generation, and no
@@ -39,6 +48,7 @@ const HTTP_METHODS = new Set([
 ]);
 
 const SUCCESS_RESPONSE_MEDIA_TYPE_PREFERENCE = ["application/hal+json", "application/json"];
+const SINGLE_RESOURCE_READ_MEDIA_TYPE_PREFERENCE = ["application/json", "application/hal+json"];
 const ERROR_RESPONSE_MEDIA_TYPE_PREFERENCE = ["application/problem+json"];
 const DEFAULT_REQUEST_BODY_MEDIA_TYPE_PREFERENCE = ["application/json"];
 const PATCH_REQUEST_BODY_MEDIA_TYPE_PREFERENCE = ["application/merge-patch+json", "application/json"];
@@ -52,10 +62,26 @@ function isErrorStatusCode(statusCode) {
   return /^[45]/.test(String(statusCode).trim());
 }
 
-function responseMediaTypePreference(statusCode) {
-  return isErrorStatusCode(statusCode)
-    ? ERROR_RESPONSE_MEDIA_TYPE_PREFERENCE
+function responseMediaTypePreference(statusCode, { isSingleResourceRead = false } = {}) {
+  if (isErrorStatusCode(statusCode)) {
+    return ERROR_RESPONSE_MEDIA_TYPE_PREFERENCE;
+  }
+
+  return isSingleResourceRead
+    ? SINGLE_RESOURCE_READ_MEDIA_TYPE_PREFERENCE
     : SUCCESS_RESPONSE_MEDIA_TYPE_PREFERENCE;
+}
+
+// A path "ends in a path parameter" when its last segment is a single
+// `{name}` template, e.g. `/entities/{id}` or `/entities/{id}/versions/{v}`.
+function endsWithPathParameter(path) {
+  const segments = String(path).split("/").filter(Boolean);
+  const lastSegment = segments.at(-1) ?? "";
+  return /^\{[^}]+\}$/.test(lastSegment);
+}
+
+function isSingleResourceGet(method, path) {
+  return String(method).toLowerCase() === "get" && endsWithPathParameter(path);
 }
 
 // Forms are identified by content rather than by path or operationId, so the
@@ -120,7 +146,7 @@ function resolveComponentRef(document, node) {
   return document.components?.[section]?.[decodeJsonPointerSegment(encodedName)] ?? node;
 }
 
-function reduceOperationToCanonicalRepresentations(document, operation, method) {
+function reduceOperationToCanonicalRepresentations(document, operation, method, path) {
   const requestBody = resolveComponentRef(document, operation.requestBody);
   if (requestBody?.content) {
     requestBody.content = reduceContentToSingleMediaType(
@@ -130,6 +156,8 @@ function reduceOperationToCanonicalRepresentations(document, operation, method) 
   }
 
   if (isPlainObject(operation.responses)) {
+    const isSingleResourceRead = isSingleResourceGet(method, path);
+
     for (const [statusCode, rawResponse] of Object.entries(operation.responses)) {
       const response = resolveComponentRef(document, rawResponse);
       if (!isPlainObject(response) || !response.content) {
@@ -138,7 +166,7 @@ function reduceOperationToCanonicalRepresentations(document, operation, method) 
 
       response.content = reduceContentToSingleMediaType(
         response.content,
-        responseMediaTypePreference(statusCode)
+        responseMediaTypePreference(statusCode, { isSingleResourceRead })
       );
     }
   }
@@ -252,7 +280,7 @@ function fillMissingArrayItemSchemas(node) {
 function reduceToCanonicalClientSpec(document) {
   const canonical = structuredClone(document);
 
-  for (const pathItem of Object.values(canonical.paths ?? {})) {
+  for (const [path, pathItem] of Object.entries(canonical.paths ?? {})) {
     if (!isPlainObject(pathItem)) {
       continue;
     }
@@ -262,7 +290,7 @@ function reduceToCanonicalClientSpec(document) {
         continue;
       }
 
-      reduceOperationToCanonicalRepresentations(canonical, operation, method);
+      reduceOperationToCanonicalRepresentations(canonical, operation, method, path);
     }
   }
 
@@ -273,6 +301,7 @@ function reduceToCanonicalClientSpec(document) {
 
 export {
   isErrorStatusCode,
+  isSingleResourceGet,
   requestBodyMediaTypePreference,
   responseMediaTypePreference,
   reduceContentToSingleMediaType,

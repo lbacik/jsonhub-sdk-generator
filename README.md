@@ -146,17 +146,25 @@ reduces it before generation to exactly one representation per operation, follow
 shared policy — instead of the single global `--prefer-media-type` flag (removed):
 
 ```
-response 2xx      -> application/hal+json, falling back to application/json
-response 4xx/5xx  -> application/problem+json
-request body      -> application/json
-  PATCH           -> application/merge-patch+json
-  OAuth forms     -> application/x-www-form-urlencoded
+response 2xx (single-resource GET) -> application/json, falling back to application/hal+json
+response 2xx (everything else)     -> application/hal+json, falling back to application/json
+response 4xx/5xx                   -> application/problem+json
+request body                       -> application/json
+  PATCH                            -> application/merge-patch+json
+  OAuth forms                      -> application/x-www-form-urlencoded
 ```
 
-The choice for `responses` is based on the status code, and for `requestBody` on the
-HTTP method and the presence of `application/x-www-form-urlencoded` in the content
-(OAuth forms). If none of the preferred types is present in `content`, the CLI keeps the
-first available type, so every operation always ends up with exactly one representation.
+The choice for `responses` is based on the status code and, for 2xx, on whether the
+operation is a single-resource GET (a GET whose path ends in a path parameter, e.g.
+`/entities/{id}`, as opposed to a collection GET like `/entities`). JsonHub's HAL
+representation of a single resource carries its relations under `_links`/`_embedded`
+rather than as direct properties, so a model generated from the direct (non-HAL) schema
+needs the plain `application/json` representation; collection GETs still prefer
+`application/hal+json`, since pagination needs the HAL envelope. The choice for
+`requestBody` is based on the HTTP method and the presence of
+`application/x-www-form-urlencoded` in the content (OAuth forms). If none of the
+preferred types is present in `content`, the CLI keeps the first available type, so every
+operation always ends up with exactly one representation.
 
 The reduction is a pure document transformation (no network access, no code generation)
 and currently works for specifications in JSON format. The result is written as a
@@ -171,8 +179,9 @@ rather than `openapi-generator-cli`, wrapped by a thin adapter in `python-adapte
 repository's per-SDK-Target toolchain policy (see `CONTEXT.md`'s definition of SDK Target and
 `AGENTS.md`), the adapter performs no representation selection of its own: it is handed the
 Canonical Client Spec described above — already reduced to one representation per operation, with
-success responses resolved to `application/hal+json` and errors to `application/problem+json` — and
-does nothing but invoke `openapi-python-client generate` on it.
+success responses resolved to `application/hal+json` (or `application/json` for single-resource
+GETs) and errors to `application/problem+json` — and does nothing but invoke
+`openapi-python-client generate` on it.
 
 **One-time setup**, since `openapi-python-client` runs on its own Python/Poetry toolchain rather
 than the Node one this CLI otherwise uses:
@@ -198,9 +207,11 @@ conformance suite, carried over from the Python-only generator this ticket repla
 Blocked-by chain on [issue #3](https://github.com/lbacik/jsonhub-sdk-generator/issues/3)). It no
 longer drives any transformation of its own — there isn't one left on the Python side — so it
 reads a sample Canonical Client Spec fixture directly and asserts the invariants the Python
-generator depends on: exactly one representation per operation (carried over unchanged), and that
+generator depends on: exactly one representation per operation (carried over unchanged), that
 collection endpoints keep their total item count, page size, and current page — rewritten from
-JSON:API to HAL, since that's this repository's shared policy now. Run it with:
+JSON:API to HAL, since that's this repository's shared policy now — and that single-resource GETs
+resolve to `application/json` with their relations inlined as direct properties, not under HAL's
+`_links`/`_embedded` (issue #14). Run it with:
 
 ```bash
 cd python-adapter

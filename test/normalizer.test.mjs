@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   fillMissingArrayItemSchemas,
   isErrorStatusCode,
+  isSingleResourceGet,
   pruneUnreachableSchemas,
   reduceContentToSingleMediaType,
   reduceToCanonicalClientSpec,
@@ -36,6 +37,33 @@ test("responseMediaTypePreference prefers hal+json then json for success", () =>
 
 test("responseMediaTypePreference resolves errors to problem+json only", () => {
   assert.deepEqual(responseMediaTypePreference("404"), ["application/problem+json"]);
+});
+
+test("responseMediaTypePreference prefers json then hal+json for single-resource reads", () => {
+  assert.deepEqual(responseMediaTypePreference("200", { isSingleResourceRead: true }), [
+    "application/json",
+    "application/hal+json"
+  ]);
+});
+
+test("responseMediaTypePreference still resolves single-resource error responses to problem+json", () => {
+  assert.deepEqual(responseMediaTypePreference("404", { isSingleResourceRead: true }), [
+    "application/problem+json"
+  ]);
+});
+
+test("isSingleResourceGet is true for a GET whose path ends in a path parameter", () => {
+  assert.equal(isSingleResourceGet("get", "/api/entities/{id}"), true);
+  assert.equal(isSingleResourceGet("GET", "/api/entities/{id}"), true);
+});
+
+test("isSingleResourceGet is false for a GET on a collection path", () => {
+  assert.equal(isSingleResourceGet("get", "/api/entities"), false);
+});
+
+test("isSingleResourceGet is false for non-GET methods, even on a single-resource path", () => {
+  assert.equal(isSingleResourceGet("patch", "/api/entities/{id}"), false);
+  assert.equal(isSingleResourceGet("post", "/api/entities/{id}"), false);
 });
 
 test("requestBodyMediaTypePreference defaults to json", () => {
@@ -207,6 +235,79 @@ test("success responses resolve to plain json where hal+json is not offered", ()
   const canonical = reduceToCanonicalClientSpec(spec);
   assert.deepEqual(Object.keys(canonical.paths["/oauth2/token"].post.responses[200].content), [
     "application/json"
+  ]);
+});
+
+test("a single-resource GET resolves to plain json even where hal+json is also offered", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Entity.jsonhal" } },
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        }
+      },
+      "/api/entities": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/EntityCollection" } },
+                "application/json": { schema: { $ref: "#/components/schemas/EntityCollection.plain" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      "Entity.jsonhal": { type: "object" },
+      Entity: { type: "object" },
+      EntityCollection: { type: "object" },
+      "EntityCollection.plain": { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.deepEqual(Object.keys(canonical.paths["/api/entities/{id}"].get.responses[200].content), [
+    "application/json"
+  ]);
+  assert.deepEqual(Object.keys(canonical.paths["/api/entities"].get.responses[200].content), [
+    "application/hal+json"
+  ]);
+});
+
+test("a single-resource GET falls back to hal+json when json is not offered", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Entity.jsonhal" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      "Entity.jsonhal": { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.deepEqual(Object.keys(canonical.paths["/api/entities/{id}"].get.responses[200].content), [
+    "application/hal+json"
   ]);
 });
 

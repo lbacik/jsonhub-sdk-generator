@@ -56,6 +56,43 @@
         }
       }
     },
+    "/api/entities/{id}": {
+      "get": {
+        "operationId": "getEntity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entity, with its definition relation inlined as a direct property",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/definitions/{id}": {
       "get": {
         "operationId": "getDefinition",
@@ -211,6 +248,17 @@
           },
           "detail": {
             "type": "string"
+          }
+        }
+      },
+      "Entity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/Definition"
           }
         }
       }
