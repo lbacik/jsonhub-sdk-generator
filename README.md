@@ -244,6 +244,21 @@ cd python-adapter
 poetry run python -m unittest discover -s tests -v
 ```
 
+That sample Canonical Client Spec
+(`python-adapter/tests/fixtures/canonical-client-spec.sample.json`) is generated, not written by
+hand: `src/normalizer.mjs` reduces the sample API Contract committed beside it
+(`api-contract.sample.json`) exactly as the pipeline reduces the real one. Edit the contract, then
+regenerate:
+
+```bash
+npm run write-conformance-fixture
+```
+
+`test/conformance-fixture.test.mjs` fails while the committed fixture and the sample contract
+disagree, so a policy change in `src/normalizer.mjs` surfaces as a fixture diff rather than as a
+conformance suite quietly asserting yesterday's policy — which is what it had been doing until
+issue #14's follow-up (see `AGENTS.md`).
+
 ## Pruning unused models
 
 The `--prune-unused-models` flag currently works for the `ts` target.

@@ -158,3 +158,10 @@ sends nothing unless the caller passes it (tracked separately - `ts` consumers c
 today). Both halves are load-bearing: the media type picks the model, the parameter picks the
 header. Don't remove one assuming the other covers it - issue #14 was closed on exactly that
 assumption and had to be reopened.
+
+Changing that policy also changes the Python SDK Target's conformance fixture
+(`python-adapter/tests/fixtures/canonical-client-spec.sample.json`), which is generated from the
+sample API Contract beside it by `npm run write-conformance-fixture` and guarded by
+`test/conformance-fixture.test.mjs`. Regenerate it in the same commit as the policy change; don't
+hand-edit it. It used to be hand-maintained, and drifted into asserting a policy this repository
+had already abandoned.
