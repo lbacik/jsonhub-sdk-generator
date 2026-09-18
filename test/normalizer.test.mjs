@@ -3,8 +3,10 @@ import { test } from "node:test";
 
 import {
   fillMissingArrayItemSchemas,
+  isAcceptHeaderParameter,
   isErrorStatusCode,
   isSingleResourceGet,
+  isSuccessStatusCode,
   pruneUnreachableSchemas,
   reduceContentToSingleMediaType,
   reduceToCanonicalClientSpec,
@@ -754,4 +756,289 @@ test("reduceToCanonicalClientSpec is a pure transformation that does not mutate 
   reduceToCanonicalClientSpec(spec);
 
   assert.deepEqual(spec, before);
+});
+
+// The Accept header parameter: the request-side half of the representation
+// choice above. See src/normalizer.mjs's header comment for why the choice has
+// to be stated as a parameter rather than left implicit in `content`.
+
+function acceptParameterOf(operation) {
+  return (operation.parameters ?? []).find(isAcceptHeaderParameter) ?? null;
+}
+
+test("isSuccessStatusCode treats 2xx as success and everything else as not", () => {
+  assert.equal(isSuccessStatusCode("200"), true);
+  assert.equal(isSuccessStatusCode("201"), true);
+  assert.equal(isSuccessStatusCode("2XX"), true);
+  assert.equal(isSuccessStatusCode("404"), false);
+  assert.equal(isSuccessStatusCode("500"), false);
+  assert.equal(isSuccessStatusCode("default"), false);
+});
+
+test("isAcceptHeaderParameter matches an Accept header parameter case-insensitively", () => {
+  assert.equal(isAcceptHeaderParameter({ name: "Accept", in: "header" }), true);
+  assert.equal(isAcceptHeaderParameter({ name: "accept", in: "header" }), true);
+  assert.equal(isAcceptHeaderParameter({ name: "Accept", in: "query" }), false);
+  assert.equal(isAcceptHeaderParameter({ name: "Accept-Language", in: "header" }), false);
+  assert.equal(isAcceptHeaderParameter({ in: "header" }), false);
+  assert.equal(isAcceptHeaderParameter(null), false);
+});
+
+test("a single-resource GET declares an Accept parameter defaulting to plain json", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Entity.jsonhal" } },
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            },
+            404: {
+              content: {
+                "application/problem+json": { schema: { $ref: "#/components/schemas/Error" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Entity: { type: "object" },
+      "Entity.jsonhal": { type: "object" },
+      Error: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.deepEqual(acceptParameterOf(canonical.paths["/api/entities/{id}"].get), {
+    name: "Accept",
+    in: "header",
+    required: false,
+    schema: { type: "string", default: "application/json" }
+  });
+});
+
+test("a collection GET declares an Accept parameter defaulting to hal+json", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": {
+                  schema: { $ref: "#/components/schemas/EntityCollection" }
+                },
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Entity: { type: "object" },
+      EntityCollection: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.equal(
+    acceptParameterOf(canonical.paths["/api/entities"].get).schema.default,
+    "application/hal+json"
+  );
+});
+
+test("the Accept parameter follows the operation's own 2xx representation, not its error one", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/definitions": {
+        post: {
+          requestBody: {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Definition" } }
+            }
+          },
+          responses: {
+            201: {
+              content: {
+                "application/hal+json": {
+                  schema: { $ref: "#/components/schemas/Definition.jsonhal" }
+                }
+              }
+            },
+            422: {
+              content: {
+                "application/problem+json": {
+                  schema: { $ref: "#/components/schemas/ConstraintViolation" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Definition: { type: "object" },
+      "Definition.jsonhal": { type: "object" },
+      ConstraintViolation: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.equal(
+    acceptParameterOf(canonical.paths["/api/definitions"].post).schema.default,
+    "application/hal+json"
+  );
+});
+
+test("declaring the Accept parameter preserves the operation's existing parameters", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities": {
+        get: {
+          parameters: [{ name: "page", in: "query", schema: { type: "integer" } }],
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": {
+                  schema: { $ref: "#/components/schemas/EntityCollection" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      EntityCollection: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+  const { parameters } = canonical.paths["/api/entities"].get;
+
+  assert.equal(parameters.length, 2);
+  assert.deepEqual(parameters[0], { name: "page", in: "query", schema: { type: "integer" } });
+  assert.equal(parameters[1].name, "Accept");
+});
+
+test("an operation that already negotiates Accept itself is left alone", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        get: {
+          parameters: [
+            { name: "accept", in: "header", schema: { type: "string" } }
+          ],
+          responses: {
+            200: {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Entity: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+  const { parameters } = canonical.paths["/api/entities/{id}"].get;
+
+  assert.equal(parameters.length, 1);
+  assert.deepEqual(parameters[0], { name: "accept", in: "header", schema: { type: "string" } });
+});
+
+test("an Accept parameter inherited from the path item suppresses the declaration too", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        parameters: [{ name: "Accept", in: "header", schema: { type: "string" } }],
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Entity: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.equal(canonical.paths["/api/entities/{id}"].get.parameters, undefined);
+});
+
+test("an Accept parameter reached through a $ref is recognised, not duplicated", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        get: {
+          parameters: [{ $ref: "#/components/parameters/AcceptHeader" }],
+          responses: {
+            200: {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Entity: { type: "object" }
+    }
+  });
+
+  spec.components.parameters = {
+    AcceptHeader: { name: "Accept", in: "header", schema: { type: "string" } }
+  };
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.deepEqual(canonical.paths["/api/entities/{id}"].get.parameters, [
+    { $ref: "#/components/parameters/AcceptHeader" }
+  ]);
+});
+
+test("an operation with no 2xx representation declares no Accept parameter", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/entities/{id}": {
+        delete: {
+          responses: {
+            204: {},
+            404: {
+              content: {
+                "application/problem+json": { schema: { $ref: "#/components/schemas/Error" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Error: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.equal(canonical.paths["/api/entities/{id}"].delete.parameters, undefined);
 });

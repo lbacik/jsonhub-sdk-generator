@@ -13,6 +13,7 @@
     "decide-release": "node ./src/decide-release.mjs",
     "write-package-metadata": "node ./src/write-package-metadata.mjs",
     "canonical-spec-digest": "node ./src/canonical-spec-digest.mjs",
+    "write-conformance-fixture": "node ./src/write-conformance-fixture.mjs",
     "test": "node --test"
   },
   "engines": {

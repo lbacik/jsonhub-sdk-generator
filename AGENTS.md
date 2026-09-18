@@ -141,13 +141,27 @@ entry point — `npm run generate -- --target python` is still how a caller invo
 definition in `CONTEXT.md` describes. The adapter itself stays thin: it performs no representation
 selection, consuming the Canonical Client Spec `src/normalizer.mjs` already produced.
 
-Known gap: `src/normalizer.mjs`'s per-operation media-type selection only shapes which schema
-`openapi-python-client` generates a model from - it does not, and cannot, make the `python` target
-emit a matching per-operation `Accept` header. Unlike `openapi-generator-cli` (used for
-`ts`/`js`/`php`), `openapi-python-client` 0.26.2 never writes an `Accept` header into a generated
-operation's `_get_kwargs()`; it uses the response `content` entry only to pick the model class for
-parsing, so whatever `Accept` a Python SDK consumer sends is whichever value was set once as a
-client-level default downstream (in `jsonhub-sdk-python`/its consumers), not something driven by
-this repo's spec at all. Don't assume that reducing a response's media types in the Canonical
-Client Spec is sufficient to fix request-side content negotiation for the `python` target - see
-issue #14, closed on that assumption and reopened once this was found not to hold.
+Reducing a response's `content` to one media type does not, on its own, make any target ask for
+that media type. Neither generator derives a request-side `Accept` header from a response's
+`content` entry: `openapi-python-client` 0.26.2 uses it only to pick the model class it parses the
+body with, and `openapi-generator-cli` 7.21.0's `typescript-fetch` emits no `Accept` header at all
+(it sets `Content-Type` for request bodies, and nothing else). Left there, the header is whatever
+a consumer set once as a client-level default downstream - which is how issue #14 survived a fix
+that looked complete.
+
+So `src/normalizer.mjs` states the choice as something both generators do render: alongside
+reducing `content`, each operation gains an `Accept` header parameter defaulting to the chosen 2xx
+representation. `openapi-python-client` turns that into a keyword-only argument carrying the
+default, so the right header goes out per operation and a caller can still override it;
+`typescript-fetch` renders it optional and drops the `default`, so `ts` can negotiate but still
+sends nothing unless the caller passes it (tracked separately - `ts` consumers compensate by hand
+today). Both halves are load-bearing: the media type picks the model, the parameter picks the
+header. Don't remove one assuming the other covers it - issue #14 was closed on exactly that
+assumption and had to be reopened.
+
+Changing that policy also changes the Python SDK Target's conformance fixture
+(`python-adapter/tests/fixtures/canonical-client-spec.sample.json`), which is generated from the
+sample API Contract beside it by `npm run write-conformance-fixture` and guarded by
+`test/conformance-fixture.test.mjs`. Regenerate it in the same commit as the policy change; don't
+hand-edit it. It used to be hand-maintained, and drifted into asserting a policy this repository
+had already abandoned.
