@@ -166,6 +166,29 @@ needs the plain `application/json` representation; collection GETs still prefer
 preferred types is present in `content`, the CLI keeps the first available type, so every
 operation always ends up with exactly one representation.
 
+Choosing a representation is only half of the negotiation — the client also has to ask
+for it, and neither generator derives a request-side `Accept` header from a response's
+`content` entry. So each operation additionally gets an `Accept` header parameter
+defaulting to the representation chosen above:
+
+```json
+{ "name": "Accept", "in": "header", "required": false,
+  "schema": { "type": "string", "default": "application/json" } }
+```
+
+`openapi-python-client` renders this as a keyword-only argument carrying the default, so
+the header goes out per operation and a caller can still override it:
+
+```python
+def sync_detailed(id, *, client, accept: Union[Unset, str] = "application/json") -> ...
+```
+
+`typescript-fetch` renders it as an optional `accept?: string` but drops the `default`, so
+the `ts` target can negotiate per call yet still sends nothing unless the caller passes it.
+Operations whose specification already declares an `Accept` parameter of its own (directly,
+through a `$ref`, or on the path item) are left alone, as are operations with no `2xx`
+body.
+
 The reduction is a pure document transformation (no network access, no code generation)
 and currently works for specifications in JSON format. The result is written as a
 separate, inspectable file to `.cache/canonical-client-spec.json`, and it — not the raw
@@ -180,7 +203,8 @@ repository's per-SDK-Target toolchain policy (see `CONTEXT.md`'s definition of S
 `AGENTS.md`), the adapter performs no representation selection of its own: it is handed the
 Canonical Client Spec described above — already reduced to one representation per operation, with
 success responses resolved to `application/hal+json` (or `application/json` for single-resource
-GETs) and errors to `application/problem+json` — and does nothing but invoke
+GETs), errors to `application/problem+json`, and each operation carrying an `Accept` parameter
+defaulting to its chosen representation — and does nothing but invoke
 `openapi-python-client generate` on it.
 
 **One-time setup**, since `openapi-python-client` runs on its own Python/Poetry toolchain rather
@@ -209,9 +233,11 @@ longer drives any transformation of its own — there isn't one left on the Pyth
 reads a sample Canonical Client Spec fixture directly and asserts the invariants the Python
 generator depends on: exactly one representation per operation (carried over unchanged), that
 collection endpoints keep their total item count, page size, and current page — rewritten from
-JSON:API to HAL, since that's this repository's shared policy now — and that single-resource GETs
+JSON:API to HAL, since that's this repository's shared policy now — that single-resource GETs
 resolve to `application/json` with their relations inlined as direct properties, not under HAL's
-`_links`/`_embedded` (issue #14). Run it with:
+`_links`/`_embedded` (issue #14), and that every operation asks for the representation it declares
+through a matching `Accept` header parameter, the half of issue #14 the media-type choice alone
+doesn't cover. Run it with:
 
 ```bash
 cd python-adapter

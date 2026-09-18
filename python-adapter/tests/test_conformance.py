@@ -5,8 +5,10 @@ Python-specific projection that this adapter no longer builds (see the
 repository's AGENTS.md and CONTEXT.md). It is retained here, repointed at a
 sample Canonical Client Spec fixture, because it encodes real knowledge about
 what breaks the Python generator - most notably that every operation must
-carry exactly one representation. Its pagination assertions are rewritten
-from JSON:API to HAL, per this repository's Canonical Client Spec policy.
+carry exactly one representation, and must ask for that representation through
+an `Accept` header parameter, since the generator derives no such header from
+a response's `content` entry. Its pagination assertions are rewritten from
+JSON:API to HAL, per this repository's Canonical Client Spec policy.
 """
 
 import json
@@ -14,6 +16,17 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+# FIXME(next pass): the fixture is hand-maintained and has drifted from what
+# src/normalizer.mjs actually produces - `GET /api/definitions/{id}` resolves to
+# application/hal+json, though it is a single-resource GET and the policy
+# prefers application/json for those (README, "Canonical Client Spec"). Either
+# the sample contract it was written against offered no application/json for
+# that operation, in which case the fallback is correct and should be spelled
+# out here, or the fixture predates the policy and should be regenerated. Until
+# that is settled the fixture under-represents the single-resource rule: only
+# `/api/entities/{id}` exercises it. The assertions below are deliberately
+# written against each operation's own representation rather than a hardcoded
+# media type, so they stay honest either way.
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "canonical-client-spec.sample.json"
 
 HAL_JSON = "application/hal+json"
@@ -98,6 +111,45 @@ class CanonicalClientSpecConformanceTests(unittest.TestCase):
         self.assertIn("definition", properties)
         self.assertNotIn("_links", properties)
         self.assertNotIn("_embedded", properties)
+
+    def test_every_operation_asks_for_the_representation_it_declares(self) -> None:
+        """Regression for issue #14: choosing one representation per operation
+        only fixes the model the generator builds. `openapi-python-client`
+        derives no `Accept` header from a response's `content` entry, so the
+        Canonical Client Spec has to state the choice as an `Accept` header
+        parameter - which the generator does render, as a keyword-only
+        argument carrying that default. Without it the request goes out with
+        whatever `Accept` a consumer set once on its client.
+        """
+
+        for path, path_item in self.spec["paths"].items():
+            for method, operation in path_item.items():
+                if not isinstance(operation, dict):
+                    continue
+
+                success = next(
+                    (
+                        response
+                        for status, response in operation.get("responses", {}).items()
+                        if status.startswith("2") and "content" in response
+                    ),
+                    None,
+                )
+                if success is None:
+                    continue
+
+                with self.subTest(method=method, path=path):
+                    accept = [
+                        parameter
+                        for parameter in operation.get("parameters", [])
+                        if parameter.get("in") == "header"
+                        and parameter.get("name", "").lower() == "accept"
+                    ]
+
+                    self.assertEqual(len(accept), 1)
+                    self.assertEqual(
+                        accept[0]["schema"]["default"], next(iter(success["content"]))
+                    )
 
     def test_excludes_jsonld_and_duplicate_representation_schemas(self) -> None:
         self.assertFalse(any("jsonld" in name.lower() for name in self.schemas))

@@ -29,7 +29,18 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/hal+json"
+            }
+          }
+        ]
       },
       "post": {
         "operationId": "createDefinition",
@@ -53,7 +64,18 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/hal+json"
+            }
+          }
+        ]
       }
     },
     "/api/entities/{id}": {
@@ -66,6 +88,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/json"
             }
           }
         ],
@@ -104,6 +135,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/hal+json"
+            }
           }
         ],
         "responses": {
@@ -138,6 +178,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/hal+json"
             }
           }
         ],

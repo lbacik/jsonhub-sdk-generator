@@ -19,6 +19,19 @@
  * `application/json` representation instead. Collection GETs still prefer
  * `application/hal+json`, since pagination needs the HAL envelope.
  *
+ * Choosing a representation is only half of the negotiation: the client also
+ * has to ask for it. Neither SDK Target's generator derives a request-side
+ * `Accept` header from a response's `content` entry - `openapi-python-client`
+ * uses it only to pick the model it parses the body with, and
+ * `openapi-generator-cli`'s `typescript-fetch` emits no `Accept` header at all
+ * - so the choice has to be stated as something both generators do render: a
+ * header parameter. Each operation therefore also gains an `Accept` header
+ * parameter defaulting to the representation chosen above, which
+ * `openapi-python-client` turns into a keyword-only argument carrying that
+ * default (so the header goes out per operation, and a caller can still
+ * override it). Operations whose API Contract already negotiates `Accept`
+ * itself are left alone.
+ *
  * This module is a pure, standalone transformation: it takes a document and
  * returns a document, with no network access, no code generation, and no
  * dependency on the rest of this pipeline. That is deliberate - the policy is
@@ -53,6 +66,7 @@ const ERROR_RESPONSE_MEDIA_TYPE_PREFERENCE = ["application/problem+json"];
 const DEFAULT_REQUEST_BODY_MEDIA_TYPE_PREFERENCE = ["application/json"];
 const PATCH_REQUEST_BODY_MEDIA_TYPE_PREFERENCE = ["application/merge-patch+json", "application/json"];
 const FORM_REQUEST_BODY_MEDIA_TYPE = "application/x-www-form-urlencoded";
+const ACCEPT_HEADER_PARAMETER_NAME = "Accept";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -60,6 +74,10 @@ function isPlainObject(value) {
 
 function isErrorStatusCode(statusCode) {
   return /^[45]/.test(String(statusCode).trim());
+}
+
+function isSuccessStatusCode(statusCode) {
+  return /^2/.test(String(statusCode).trim());
 }
 
 function responseMediaTypePreference(statusCode, { isSingleResourceRead = false } = {}) {
@@ -126,9 +144,11 @@ function decodeJsonPointerSegment(segment) {
   return decodeURIComponent(segment.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 
-// requestBody and response objects may themselves be $refs into
-// components.requestBodies / components.responses (common in API-Platform
-// specs). Resolve one level so the policy still reaches their `content`.
+// requestBody, response, and parameter objects may themselves be $refs into
+// components.requestBodies / components.responses / components.parameters
+// (common in API-Platform specs). Resolve one level so the policy still
+// reaches their `content`, and so an already-declared `Accept` parameter is
+// recognised through its $ref rather than duplicated.
 // If several operations share one such component with conflicting policies
 // (e.g. both POST and PATCH pointing at the same components.requestBodies
 // entry), the last operation processed wins - not a shape this API uses.
@@ -137,7 +157,7 @@ function resolveComponentRef(document, node) {
     return node;
   }
 
-  const match = node.$ref.match(/^#\/components\/(requestBodies|responses)\/(.+)$/);
+  const match = node.$ref.match(/^#\/components\/(requestBodies|responses|parameters)\/(.+)$/);
   if (!match) {
     return node;
   }
@@ -146,7 +166,45 @@ function resolveComponentRef(document, node) {
   return document.components?.[section]?.[decodeJsonPointerSegment(encodedName)] ?? node;
 }
 
-function reduceOperationToCanonicalRepresentations(document, operation, method, path) {
+// An `in: header` parameter's name is case-insensitive per RFC 9110, so a
+// contract spelling it "accept" already negotiates the representation itself.
+function isAcceptHeaderParameter(parameter) {
+  return (
+    isPlainObject(parameter) &&
+    parameter.in === "header" &&
+    String(parameter.name ?? "").toLowerCase() === ACCEPT_HEADER_PARAMETER_NAME.toLowerCase()
+  );
+}
+
+// A path item may declare parameters shared by every operation under it, so
+// both lists count when deciding whether `Accept` is already negotiated.
+function declaresAcceptHeaderParameter(document, ...parameterLists) {
+  return parameterLists.some(
+    (parameters) =>
+      Array.isArray(parameters) &&
+      parameters.some((parameter) => isAcceptHeaderParameter(resolveComponentRef(document, parameter)))
+  );
+}
+
+// Stated as a parameter with a `default` rather than a required one: that is
+// what makes openapi-python-client render a keyword-only argument carrying the
+// chosen representation, leaving every existing call site valid.
+function declareAcceptHeaderParameter(operation, mediaType) {
+  operation.parameters = [
+    ...(Array.isArray(operation.parameters) ? operation.parameters : []),
+    {
+      name: ACCEPT_HEADER_PARAMETER_NAME,
+      in: "header",
+      required: false,
+      schema: {
+        type: "string",
+        default: mediaType
+      }
+    }
+  ];
+}
+
+function reduceOperationToCanonicalRepresentations(document, pathItem, operation, method, path) {
   const requestBody = resolveComponentRef(document, operation.requestBody);
   if (requestBody?.content) {
     requestBody.content = reduceContentToSingleMediaType(
@@ -155,20 +213,36 @@ function reduceOperationToCanonicalRepresentations(document, operation, method, 
     );
   }
 
-  if (isPlainObject(operation.responses)) {
-    const isSingleResourceRead = isSingleResourceGet(method, path);
+  if (!isPlainObject(operation.responses)) {
+    return;
+  }
 
-    for (const [statusCode, rawResponse] of Object.entries(operation.responses)) {
-      const response = resolveComponentRef(document, rawResponse);
-      if (!isPlainObject(response) || !response.content) {
-        continue;
-      }
+  const isSingleResourceRead = isSingleResourceGet(method, path);
+  let successMediaType = null;
 
-      response.content = reduceContentToSingleMediaType(
-        response.content,
-        responseMediaTypePreference(statusCode, { isSingleResourceRead })
-      );
+  for (const [statusCode, rawResponse] of Object.entries(operation.responses)) {
+    const response = resolveComponentRef(document, rawResponse);
+    if (!isPlainObject(response) || !response.content) {
+      continue;
     }
+
+    response.content = reduceContentToSingleMediaType(
+      response.content,
+      responseMediaTypePreference(statusCode, { isSingleResourceRead })
+    );
+
+    // The first 2xx wins - responses keep the contract's own order, so that is
+    // the operation's primary success representation (typically 200 or 201).
+    if (successMediaType === null && isSuccessStatusCode(statusCode)) {
+      successMediaType = Object.keys(response.content)[0] ?? null;
+    }
+  }
+
+  if (
+    successMediaType !== null &&
+    !declaresAcceptHeaderParameter(document, operation.parameters, pathItem.parameters)
+  ) {
+    declareAcceptHeaderParameter(operation, successMediaType);
   }
 }
 
@@ -290,7 +364,7 @@ function reduceToCanonicalClientSpec(document) {
         continue;
       }
 
-      reduceOperationToCanonicalRepresentations(canonical, operation, method, path);
+      reduceOperationToCanonicalRepresentations(canonical, pathItem, operation, method, path);
     }
   }
 
@@ -301,7 +375,9 @@ function reduceToCanonicalClientSpec(document) {
 
 export {
   isErrorStatusCode,
+  isSuccessStatusCode,
   isSingleResourceGet,
+  isAcceptHeaderParameter,
   requestBodyMediaTypePreference,
   responseMediaTypePreference,
   reduceContentToSingleMediaType,
