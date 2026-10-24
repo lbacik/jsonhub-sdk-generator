@@ -1,4 +1,4 @@
-// Runtime test for the `ts` SDK's `Accept` header (needs Java).
+// Runtime test for the `ts` SDK Surface (needs Java).
 //
 // Generates the `ts` SDK Surface from the committed sample API Contract with
 // the pinned toolchain and the `src/templates/typescript-fetch` override,
@@ -6,7 +6,14 @@
 // ts`); transpiles it with the pinned `typescript` devDependency (without
 // installing the generated package's own dependencies); drives it with a fake
 // `fetchApi` that records requests and returns canned responses; and asserts
-// on the headers the generated SDK actually sends - not on template text.
+// on what the generated SDK actually sends and returns - not on template text:
+// the `Accept` headers (the Canonical Client Spec default goes out unless the
+// caller passes `accept`), the `Authorization` header for `oauth2`- and
+// `http`/`bearer`-secured operations (a raw token from the `accessToken`
+// provider goes out as `Bearer <token>`), and the typed models for HAL
+// collection items (`_embedded.item` entries arrive with `createdAt` as a
+// `Date` and `links` rather than `_links`) and for POST/PATCH responses (the
+// relation arrives as a direct member).
 //
 // Run it with:
 //
@@ -39,19 +46,32 @@ let DefaultApi = null;
 let Configuration = null;
 const recorded = [];
 
+let cannedBody = {};
+
+function setCannedBody(body) {
+  cannedBody = body;
+}
+
 function cannedResponse() {
   return {
     status: 200,
     headers: { get: () => "application/json" },
-    json: async () => ({}),
-    text: async () => "{}"
+    json: async () => cannedBody,
+    text: async () => JSON.stringify(cannedBody)
   };
 }
 
-function lastAcceptHeader() {
+function lastRequestHeaders() {
   assert.ok(recorded.length > 0, "expected the fake fetchApi to have recorded a request");
-  const headers = recorded[recorded.length - 1].init?.headers ?? {};
-  return headers["Accept"];
+  return recorded[recorded.length - 1].init?.headers ?? {};
+}
+
+function lastAcceptHeader() {
+  return lastRequestHeaders()["Accept"];
+}
+
+function lastAuthHeader() {
+  return lastRequestHeaders()["Authorization"];
 }
 
 async function transpileGeneratedSdk(srcDir, distDir) {
@@ -178,12 +198,29 @@ after(async () => {
 
 function createApi() {
   recorded.length = 0;
+  setCannedBody({});
   const configuration = new Configuration({
     basePath: "http://localhost",
     fetchApi: async (url, init) => {
       recorded.push({ url, init });
       return cannedResponse();
     }
+  });
+  return new DefaultApi(configuration);
+}
+
+// An `accessToken` provider returning the raw token, as PaySubscriptions'
+// consumers configure it: the SDK adds the `Bearer ` prefix itself.
+function createAuthedApi() {
+  recorded.length = 0;
+  setCannedBody({});
+  const configuration = new Configuration({
+    basePath: "http://localhost",
+    fetchApi: async (url, init) => {
+      recorded.push({ url, init });
+      return cannedResponse();
+    },
+    accessToken: async () => "raw-token-123"
   });
   return new DefaultApi(configuration);
 }
@@ -228,4 +265,63 @@ test("an explicit accept sends that value instead (single-resource GET)", async 
   const api = createApi();
   await api.getDefinition({ id: "d1", accept: "application/vnd.api+json" });
   assert.equal(lastAcceptHeader(), "application/vnd.api+json");
+});
+
+test("an oauth2-secured operation sends the raw accessToken as Bearer <token>", async () => {
+  const api = createAuthedApi();
+  await api.listDefinitions();
+  assert.equal(lastAuthHeader(), "Bearer raw-token-123");
+});
+
+test("an http/bearer-secured operation's Authorization header is unchanged", async () => {
+  const api = createAuthedApi();
+  await api.getDefinition({ id: "d1" });
+  assert.equal(lastAuthHeader(), "Bearer raw-token-123");
+});
+
+test("a HAL collection response's _embedded.item entries come back as typed models", async () => {
+  const api = createApi();
+  setCannedBody({
+    totalItems: 1,
+    itemsPerPage: 30,
+    page: 1,
+    _links: { self: { href: "/api/definitions?page=1" } },
+    _embedded: {
+      item: [
+        {
+          id: "d1",
+          name: "One",
+          createdAt: "2026-01-02T03:04:05.000Z",
+          _links: { self: { href: "/api/definitions/d1" } }
+        }
+      ]
+    }
+  });
+  const collection = await api.listDefinitions();
+  const items = collection.embedded?.item ?? [];
+  assert.equal(items.length, 1);
+  const item = items[0];
+  assert.ok(item.createdAt instanceof Date, "expected createdAt to be parsed as a Date");
+  assert.ok("links" in item, "expected the HAL _links envelope as links");
+  assert.ok(!("_links" in item), "expected no raw _links on the typed model");
+});
+
+test("a POST response's relation arrives as a direct member", async () => {
+  const api = createApi();
+  setCannedBody({
+    id: "e1",
+    definition: { id: "d1", name: "One", createdAt: "2026-01-02T03:04:05.000Z" }
+  });
+  const created = await api.createEntity({ entity: { id: "e1", definition: { id: "d1" } } });
+  assert.equal(created.definition?.id, "d1");
+});
+
+test("a PATCH response's relation arrives as a direct member", async () => {
+  const api = createApi();
+  setCannedBody({
+    id: "e1",
+    definition: { id: "d1", name: "One", createdAt: "2026-01-02T03:04:05.000Z" }
+  });
+  const updated = await api.patchEntity({ id: "e1", entityPatch: { definition: { id: "d1" } } });
+  assert.equal(updated.definition?.id, "d1");
 });

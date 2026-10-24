@@ -1,11 +1,15 @@
 /* tslint:disable */
 /* eslint-disable */
 {{! Override of openapi-generator 7.21.0's typescript-fetch/apis.mustache (openapitools.json
-    pins 7.21.0): when an operation has an `Accept` header parameter with a default and the
+    pins 7.21.0): (1) when an operation has an `Accept` header parameter with a default and the
     caller passes no `accept`, the default is sent; a caller-supplied value still wins. Other
     header parameters are untouched (their `else if ('...' === 'Accept')` is always false, and
-    parameters without a default emit no fallback at all). Re-sync this file when bumping the
-    generator version in openapitools.json. }}
+    parameters without a default emit no fallback at all). (2) an `oauth2`-secured operation
+    sends its `accessToken` result as `Bearer <token>`, like the `http`/`bearer` branch
+    already does - the raw token on its own is rejected by oauth2-secured servers. The
+    `http`/`bearer` branch itself is untouched, so its callers must keep passing the raw
+    token. No double-prefix tolerance: a token already starting with `Bearer ` is a consumer
+    error. Re-sync this file when bumping the generator version in openapitools.json. }}
 {{>licenseInfo}}
 
 
@@ -234,8 +238,12 @@ export class {{classname}} extends runtime.BaseAPI {
         {{/isApiKey}}
         {{#isOAuth}}
         if (this.configuration && this.configuration.accessToken) {
-            // oauth required
-            headerParameters["Authorization"] = await this.configuration.accessToken("{{name}}", [{{#scopes}}"{{{scope}}}"{{^-last}}, {{/-last}}{{/scopes}}]);
+            const token = this.configuration.accessToken;
+            const tokenString = await token("{{name}}", [{{#scopes}}"{{{scope}}}"{{^-last}}, {{/-last}}{{/scopes}}]);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
         }
 
         {{/isOAuth}}

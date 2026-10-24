@@ -3,12 +3,17 @@
   "info": {
     "title": "JsonHub API",
     "version": "0.9.3",
-    "description": "Sample API Contract for the Python SDK Target's conformance suite: a stand-in for the JsonHub API, carrying the shapes the conformance suite asserts on - several representations per operation, a HAL collection envelope, JSON-LD and JSON:API variants. src/normalizer.mjs reduces it to canonical-client-spec.sample.json (`npm run write-conformance-fixture`)."
+    "description": "Sample API Contract for the Python SDK Target's conformance suite: a stand-in for the JsonHub API, carrying the shapes the conformance suite asserts on - several representations per operation, a HAL collection envelope, JSON-LD and JSON:API variants. It also carries the shapes the ts runtime suite asserts on: an oauth2-secured operation and an http/bearer-secured one, a HAL collection whose item schema declares createdAt and _links, and POST/PATCH operations whose plain-JSON representation inlines a relation. src/normalizer.mjs reduces it to canonical-client-spec.sample.json (`npm run write-conformance-fixture`)."
   },
   "paths": {
     "/api/definitions": {
       "get": {
         "operationId": "listDefinitions",
+        "security": [
+          {
+            "oauth2": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Collection",
@@ -130,6 +135,72 @@
         }
       }
     },
+    "/api/entities": {
+      "post": {
+        "operationId": "createEntity",
+        "requestBody": {
+          "content": {
+            "application/ld+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Entity.jsonld"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Entity"
+              }
+            },
+            "application/hal+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Entity.jsonhal"
+              }
+            },
+            "application/vnd.api+json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "data": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created - the definition relation is a direct property in the plain JSON representation",
+            "content": {
+              "application/ld+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity.jsonld"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity"
+                }
+              },
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity.jsonhal"
+                }
+              },
+              "application/vnd.api+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/entities/{id}": {
       "get": {
         "operationId": "getEntity",
@@ -195,11 +266,80 @@
             }
           }
         }
+      },
+      "patch": {
+        "operationId": "patchEntity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntityPatch"
+              }
+            },
+            "application/vnd.api+json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "data": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated - the definition relation is a direct property in the plain JSON representation",
+            "content": {
+              "application/ld+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity.jsonld"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity"
+                }
+              },
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entity.jsonhal"
+                }
+              },
+              "application/vnd.api+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/definitions/{id}": {
       "get": {
         "operationId": "getDefinition",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "id",
@@ -329,6 +469,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -346,6 +490,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -357,6 +505,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           },
           "_links": {
             "type": "object"
@@ -496,6 +648,33 @@
             "type": "object"
           }
         }
+      },
+      "EntityPatch": {
+        "type": "object",
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/Definition"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "oauth2": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://example.com/oauth/token",
+            "scopes": {
+              "read": "Read access",
+              "write": "Write access"
+            }
+          }
+        }
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
     }
   }
