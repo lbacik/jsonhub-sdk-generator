@@ -43,10 +43,7 @@ source "$GENERATOR_DIR/scripts/lib.sh"
 # namespace, so the repositories - unlike the packages - need the language
 # suffix. Only the short name (no organisation prefix) goes into the message,
 # matching what previous releases wrote.
-node "$GENERATOR_DIR/src/resolve-product.mjs" \
-  --products-dir "$GENERATOR_DIR/products" \
-  --product "$PRODUCT" \
-  --target "$TARGET" > "$WORK_DIR/resolution.json"
+resolve_product "$WORK_DIR/resolution.json"
 TARGET_REPO_NAME="$(json_field "$WORK_DIR/resolution.json" repository)"
 TARGET_REPO_SHORT="${TARGET_REPO_NAME##*/}"
 PACKAGE_NAME="$(json_field "$WORK_DIR/resolution.json" packageName)"

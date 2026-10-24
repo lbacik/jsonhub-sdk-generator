@@ -51,14 +51,6 @@ const NPM_PUBLISHED_FILES = Object.freeze(["dist"]);
 
 const HAND_OWNED_FIELDS = Object.freeze(["author", "license", "repository", "keywords"]);
 
-// `homepage` is hand-owned too, but optional: written when the Product's
-// hand-owned metadata provides it, omitted otherwise - unlike the four fields
-// above, whose absence means a generator placeholder slipped through and must
-// fail loudly. npm-only: Poetry's `[tool.poetry]` schema is validated strictly
-// (`poetry check` hard-fails on keys it doesn't recognise), so the python
-// manifest gains no optional passthrough here.
-const OPTIONAL_HAND_OWNED_FIELDS = Object.freeze(["homepage"]);
-
 // Poetry's own field names for the same four hand-owned facts: authors is a
 // list (poetry has no singular form), and repository is a plain URL string,
 // not the {type, url} object npm's package.json expects.
@@ -98,6 +90,15 @@ function applyBump(previousVersion, bump) {
   return `${version.major}.${version.minor}.${version.patch}`;
 }
 
+function requirePackageName({ target, packageName }) {
+  if (!packageName) {
+    throw new Error(
+      `No package name for target "${target}". ` +
+        `The package name is Product data - resolve it through src/product.mjs.`
+    );
+  }
+}
+
 function requireHandOwnedFields({ target, handOwnedMetadata, requiredFields }) {
   for (const field of requiredFields) {
     if (!handOwnedMetadata || !(field in handOwnedMetadata)) {
@@ -110,21 +111,16 @@ function requireHandOwnedFields({ target, handOwnedMetadata, requiredFields }) {
 }
 
 function buildPackageManifest({ target, packageName, generatedManifest, handOwnedMetadata, version, sourceApiVersion }) {
-  if (!packageName) {
-    throw new Error(
-      `No package name for target "${target}". ` +
-        `The package name is Product data - resolve it through src/product.mjs.`
-    );
-  }
-
+  requirePackageName({ target, packageName });
   requireHandOwnedFields({ target, handOwnedMetadata, requiredFields: HAND_OWNED_FIELDS });
 
-  const optionalFields = Object.fromEntries(
-    OPTIONAL_HAND_OWNED_FIELDS.filter((field) => field in handOwnedMetadata).map((field) => [
-      field,
-      handOwnedMetadata[field]
-    ])
-  );
+  // `homepage` is hand-owned but optional: written when the Product provides
+  // it, omitted otherwise - unlike the four required fields, whose absence
+  // means a generator placeholder slipped through and fails loudly above.
+  // npm-only: Poetry's `[tool.poetry]` schema is validated strictly, so the
+  // python manifest gains no optional passthrough here.
+  const optionalFields =
+    "homepage" in handOwnedMetadata ? { homepage: handOwnedMetadata.homepage } : {};
 
   return {
     ...generatedManifest,
@@ -143,13 +139,7 @@ function buildPackageManifest({ target, packageName, generatedManifest, handOwne
 // with a `tool.poetry` table), not a package.json - see
 // src/write-package-metadata.mjs for where the TOML parsing happens.
 function buildPoetryManifest({ target, packageName, generatedManifest, handOwnedMetadata, version, sourceApiVersion }) {
-  if (!packageName) {
-    throw new Error(
-      `No package name for target "${target}". ` +
-        `The package name is Product data - resolve it through src/product.mjs.`
-    );
-  }
-
+  requirePackageName({ target, packageName });
   requireHandOwnedFields({ target, handOwnedMetadata, requiredFields: POETRY_HAND_OWNED_FIELDS });
 
   const poetry = generatedManifest?.tool?.poetry;
@@ -185,7 +175,6 @@ function buildPoetryManifest({ target, packageName, generatedManifest, handOwned
 export {
   NPM_PUBLISHED_FILES,
   HAND_OWNED_FIELDS,
-  OPTIONAL_HAND_OWNED_FIELDS,
   POETRY_HAND_OWNED_FIELDS,
   applyBump,
   buildPackageManifest,

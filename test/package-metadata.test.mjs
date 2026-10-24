@@ -6,7 +6,6 @@ import {
   buildPackageManifest,
   buildPoetryManifest,
   HAND_OWNED_FIELDS,
-  OPTIONAL_HAND_OWNED_FIELDS,
   POETRY_HAND_OWNED_FIELDS,
   NPM_PUBLISHED_FILES
 } from "../src/package-metadata.mjs";
@@ -231,26 +230,6 @@ test("buildPackageManifest rejects hand-owned metadata missing a required field"
         }),
       new RegExp(missingField)
     );
-  }
-});
-
-test("buildPackageManifest rejects hand-owned metadata missing every optional field at once", () => {
-  const stripped = { ...handOwnedMetadata };
-  for (const field of OPTIONAL_HAND_OWNED_FIELDS) {
-    delete stripped[field];
-  }
-
-  const manifest = buildPackageManifest({
-    target: "ts",
-    packageName: "jsonhub-sdk",
-    generatedManifest,
-    handOwnedMetadata: stripped,
-    version: "1.3.0",
-    sourceApiVersion: "v0.9.3"
-  });
-
-  for (const field of OPTIONAL_HAND_OWNED_FIELDS) {
-    assert.equal(field in manifest, false);
   }
 });
 

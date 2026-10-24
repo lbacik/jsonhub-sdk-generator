@@ -51,10 +51,7 @@ source "$GENERATOR_DIR/scripts/lib.sh"
 # can't contain hyphens), so python generates the underscored module and
 # write-package-metadata.mjs then overwrites [tool.poetry].name with the
 # hyphenated PyPI distribution name.
-node "$GENERATOR_DIR/src/resolve-product.mjs" \
-  --products-dir "$GENERATOR_DIR/products" \
-  --product "$PRODUCT" \
-  --target "$TARGET" > "$WORK_DIR/resolution.json"
+resolve_product "$WORK_DIR/resolution.json"
 CLI_PACKAGE_NAME="$(json_field "$WORK_DIR/resolution.json" packageName)"
 
 # The one place this script (and publish-to-target.sh) branches per SDK
