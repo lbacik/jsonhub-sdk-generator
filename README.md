@@ -441,7 +441,7 @@ than into `[tool.poetry]` — Poetry validates `[tool.poetry]` against a fixed s
 An npm-style manifest also gets `files: ["dist"]` written every run. `openapi-generator` emits
 neither a `files` field nor a `.npmignore`, and npm's default is to pack everything not ignored,
 so without it a publish ships the whole repository — the SDK Surface, but also the hand-maintained
-`.github/` workflows, the `.jsonhub/` pipeline artifacts, `docs/`, and whatever an editor left
+`.github/` workflows, the `.sdk-pipeline/` pipeline artifacts, `docs/`, and whatever an editor left
 behind (`.idea/workspace.xml`). A published npm version can't be cleanly unpublished, so that
 leak would be permanent. `dist` alone is the whole published package: `main` and `types` both
 point into it and the generator emits no sourcemaps, so the TypeScript sources would buy consumers
@@ -547,7 +547,9 @@ repository's own rule against mixing spec-fetching logic with package-publishing
 module (see `AGENTS.md`):
 
 - **`scripts/generate-and-decide.sh`** (read-only against `TARGET_DIR`) snapshots what is already
-  committed in `jsonhub-sdk-ts` — its SDK Surface and, from `.jsonhub/canonical-client-spec.json`,
+  committed in `jsonhub-sdk-ts` — its SDK Surface and, from
+  `.sdk-pipeline/canonical-client-spec.json` (falling back to `.jsonhub/canonical-client-spec.json`
+  on SDK Targets released before the rename),
   the Canonical Client Spec that produced it — fetches the live API Contract with
   `--skip-generation` (above), and checks its digest against the previous one. Three change
   detectors are involved in total, and are allowed to disagree — see `CONTEXT.md` and
@@ -562,7 +564,7 @@ module (see `AGENTS.md`):
      much* to bump — run by `decide-release` alongside detector 2.
 
 - **`scripts/publish-to-target.sh`** reads that verdict and, only when it says to release, writes
-  the package metadata (as above), writes `.jsonhub/canonical-client-spec.json` into the freshly
+  the package metadata (as above), writes `.sdk-pipeline/canonical-client-spec.json` into the freshly
   generated output so the *next* run has something to compare against, then replaces the contents
   of `TARGET_DIR` with it — except `.github`, left untouched since it isn't generated output (see
   below) — commits, and tags `v<version>` — the same version `decide-release` and

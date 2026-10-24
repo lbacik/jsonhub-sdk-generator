@@ -80,7 +80,9 @@ DECISION_FILE="$WORK_DIR/decision.json"
 echo "== Snapshotting the previously published SDK Surface and Canonical Client Spec =="
 
 # The previous SDK Surface is whatever is already committed in the SDK
-# Target's repository. .jsonhub/, CHANGELOG.md and any lockfile a human ran
+# Target's repository. .sdk-pipeline/ (and its predecessor .jsonhub/, kept as
+# a read fallback for the first release after the rename), CHANGELOG.md and
+# any lockfile a human ran
 # (package-lock.json, poetry.lock) are not part of the generated SDK Surface
 # (pipeline/hand metadata, not generator output), so they are stripped before
 # src/release-decision.mjs compares - left in, they would make an unrelated
@@ -91,20 +93,28 @@ cp -a "$TARGET_DIR/." "$PREVIOUS_SURFACE/"
 rm -rf "$PREVIOUS_SURFACE/.git"
 rm -f "$PREVIOUS_SURFACE/CHANGELOG.md" "$PREVIOUS_SURFACE/package-lock.json" "$PREVIOUS_SURFACE/poetry.lock"
 
-if [ -f "$TARGET_DIR/.jsonhub/canonical-client-spec.json" ]; then
+# Reads prefer .sdk-pipeline/ and fall back to .jsonhub/ - the same pattern
+# as the .openapi-generator/VERSION fallback below. Writes (see
+# scripts/publish-to-target.sh) go only to .sdk-pipeline/.
+if [ -f "$TARGET_DIR/.sdk-pipeline/canonical-client-spec.json" ]; then
+  cp "$TARGET_DIR/.sdk-pipeline/canonical-client-spec.json" "$PREVIOUS_SPEC"
+elif [ -f "$TARGET_DIR/.jsonhub/canonical-client-spec.json" ]; then
   cp "$TARGET_DIR/.jsonhub/canonical-client-spec.json" "$PREVIOUS_SPEC"
 else
   echo "{}" > "$PREVIOUS_SPEC"
 fi
-rm -rf "$PREVIOUS_SURFACE/.jsonhub"
+rm -rf "$PREVIOUS_SURFACE/.sdk-pipeline" "$PREVIOUS_SURFACE/.jsonhub"
 
-# .jsonhub/toolchain-version (retained by publish-to-target.sh alongside the
-# Canonical Client Spec) is the authoritative source once a release has gone
-# through it. python has no generator-written version marker to fall back on
-# at all (unlike ts's .openapi-generator/VERSION, an openapi-generator-cli
-# artifact), so this fallback only ever fires for ts releases tagged before
-# .jsonhub/toolchain-version existed.
-if [ -f "$TARGET_DIR/.jsonhub/toolchain-version" ]; then
+# .sdk-pipeline/toolchain-version (retained by publish-to-target.sh alongside
+# the Canonical Client Spec) is the authoritative source once a release has
+# gone through it, falling back to .jsonhub/toolchain-version for SDK Targets
+# released before the rename. python has no generator-written version marker
+# to fall back on at all (unlike ts's .openapi-generator/VERSION, an
+# openapi-generator-cli artifact), so that fallback only ever fires for ts
+# releases tagged before .sdk-pipeline/toolchain-version existed.
+if [ -f "$TARGET_DIR/.sdk-pipeline/toolchain-version" ]; then
+  PREVIOUS_TOOLCHAIN_VERSION="$(cat "$TARGET_DIR/.sdk-pipeline/toolchain-version")"
+elif [ -f "$TARGET_DIR/.jsonhub/toolchain-version" ]; then
   PREVIOUS_TOOLCHAIN_VERSION="$(cat "$TARGET_DIR/.jsonhub/toolchain-version")"
 elif [ -f "$PREVIOUS_SURFACE/.openapi-generator/VERSION" ]; then
   PREVIOUS_TOOLCHAIN_VERSION="$(cat "$PREVIOUS_SURFACE/.openapi-generator/VERSION")"

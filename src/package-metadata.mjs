@@ -45,7 +45,7 @@ const PACKAGE_NAME_BY_TARGET = {
 // a per-invocation preference. openapi-generator emits neither a `files` field
 // nor a .npmignore, and npm's default is "pack everything not ignored", so
 // without this a publish ships the whole repository: the SDK Surface, but also
-// .github/ (hand-maintained CI, see README.md), the .jsonhub/ pipeline
+// .github/ (hand-maintained CI, see README.md), the .sdk-pipeline/ pipeline
 // artifacts, docs/, and whatever an editor left behind (.idea/workspace.xml).
 // A published npm version cannot be cleanly unpublished, so leaking there is
 // permanent.

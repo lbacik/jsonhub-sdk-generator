@@ -101,7 +101,7 @@ test("buildPackageManifest overwrites hand-owned fields with the maintained valu
 
 // Without a `files` field npm packs everything not ignored, and
 // openapi-generator writes neither `files` nor a .npmignore - a publish then
-// ships .github/, .jsonhub/, docs/ and any editor leftovers, permanently,
+// ships .github/, .sdk-pipeline/, docs/ and any editor leftovers, permanently,
 // since a published npm version can't be cleanly unpublished.
 test("buildPackageManifest confines the npm tarball to the built output", () => {
   const manifest = buildPackageManifest({
@@ -118,7 +118,7 @@ test("buildPackageManifest confines the npm tarball to the built output", () => 
 test("buildPackageManifest overrides a `files` field the generator put there", () => {
   const manifest = buildPackageManifest({
     target: "ts",
-    generatedManifest: { ...generatedManifest, files: ["dist", "src", ".jsonhub", ".idea"] },
+    generatedManifest: { ...generatedManifest, files: ["dist", "src", ".sdk-pipeline", ".idea"] },
     handOwnedMetadata,
     version: "1.3.0",
     sourceApiVersion: "v0.9.3"
