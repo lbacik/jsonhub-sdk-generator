@@ -25,6 +25,18 @@ This is the simplest solution that still gives you control:
 - `python` -> `openapi-python-client` (its own adapter, see "Python SDK Target" below)
 - `php` -> `php` (via `openapi-generator-cli`)
 
+Every target's toolchain reads OpenAPI `3.0` and `3.1` only (declared per target in the CLI's
+target map). After fetching a JSON contract, and before writing the Canonical Client Spec, the
+CLI reads its `openapi` field and fails fast with one line when it falls outside that set:
+
+```
+Unsupported OpenAPI version "3.2.0": supported versions are 3.0, 3.1. Request a supported rendering through the Product's `apiContractUrl` or `--url`.
+```
+
+The check also runs under `--skip-generation`, so the cheap "did the API Contract change at all?"
+path fails fast too. YAML contracts are never parsed, so they skip this check the same way they
+skip the reduction.
+
 ## Installation
 
 ```bash
