@@ -247,6 +247,12 @@ generator version in `openapitools.json`. Operations whose specification already
 `Accept` parameter of its own (directly, through a `$ref`, or on the path item) are left
 alone, as are operations with no `2xx` body.
 
+The same override also covers authorization: an `oauth2`-secured operation sends its
+`accessToken` result as `Bearer <token>`, mirroring what the `http`/`bearer` branch already
+does - the raw token on its own is rejected by oauth2-secured servers (PaySubscriptions
+secures every operation with `oauth2`, while JsonHub uses `http`/`bearer`). Pass the raw
+token in both cases; a token already starting with `Bearer ` is a consumer error.
+
 The `ts` behaviour is guarded by a runtime test that needs Java, so it runs outside plain
 `npm test`:
 
@@ -257,7 +263,9 @@ npm run test:ts-runtime
 It generates the `ts` SDK Surface from the committed sample API Contract through the CLI
 path, transpiles it with the pinned `typescript` devDependency (without installing the
 generated package's own dependencies), and drives it with a fake `fetchApi`, asserting on
-the `Accept` headers the generated SDK actually sends.
+what the generated SDK actually sends and returns: the `Accept` headers, the `Authorization`
+header for `oauth2`- and `http`/`bearer`-secured operations, the typed `_embedded.item`
+collection entries, and the direct-member relations on POST/PATCH responses.
 
 The reduction is a pure document transformation (no network access, no code generation)
 and currently works for specifications in JSON format. The result is written as a

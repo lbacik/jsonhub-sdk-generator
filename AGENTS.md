@@ -164,13 +164,22 @@ parameter picks the header. Don't remove one assuming the other covers it - issu
 on exactly that assumption and had to be reopened.
 
 The override is a copy of openapi-generator 7.21.0's `typescript-fetch/apis.mustache` (the
-version pinned in `openapitools.json`), changed in one place and carrying a comment naming that
-version. Bumping the generator version in `openapitools.json` means re-syncing the override
-against the new template. The `ts` Accept behaviour itself is guarded at the highest seam by the
-runtime test `test-ts-runtime/accept-headers.mjs` (`npm run test:ts-runtime`, needs Java so it
-stays out of plain `npm test`): it generates the `ts` SDK Surface from the committed sample API
-Contract through the CLI path, transpiles it with the pinned `typescript` devDependency, and
-asserts on the headers the generated SDK actually sends.
+version pinned in `openapitools.json`), changed in two places and carrying a comment naming that
+version: the `Accept` default above, and an `oauth2` (`isOAuth`) branch that sends its
+`accessToken` result as `Bearer <token>` - the unprefixed raw token is rejected by
+oauth2-secured servers (PaySubscriptions secures every operation with `oauth2`). The
+`http`/`bearer` branch is untouched and already prefixes, so its callers (JsonHub uses
+`http`/`bearer`) keep passing the raw token. Bumping the generator version in
+`openapitools.json` means re-syncing the override against the new template. The `ts`
+behaviour itself is guarded at the highest seam by the runtime test
+`test-ts-runtime/accept-headers.mjs` (`npm run test:ts-runtime`, needs Java so it stays out of
+plain `npm test`): it generates the `ts` SDK Surface from the committed sample API Contract
+through the CLI path, transpiles it with the pinned `typescript` devDependency, and asserts on
+what the generated SDK actually sends and returns - the `Accept` and `Authorization` headers,
+the typed `_embedded.item` collection entries (`createdAt` as a `Date`, `links` rather than
+`_links`), and the direct-member relations on POST/PATCH responses. No `_embedded.item`
+template change was needed: the typed entries follow from the contract declaring
+`_embedded.item` as an array of the HAL item schema.
 
 The `Accept` default follows the 2xx policy in `src/normalizer.mjs`: a collection read (a
 GET whose 2xx `application/json` schema resolves to `type: array`) defaults to
@@ -180,6 +189,6 @@ GET whose 2xx `application/json` schema resolves to `type: array`) defaults to
 Changing that policy also changes the Python SDK Target's conformance fixture
 (`python-adapter/tests/fixtures/canonical-client-spec.sample.json`), which is generated from the
 sample API Contract beside it by `npm run write-conformance-fixture` and guarded by
-`test/conformance-fixture.test.mjs`. Regenerate it in the same commit as the policy change; don't
-hand-edit it. It used to be hand-maintained, and drifted into asserting a policy this repository
-had already abandoned.
+`test/conformance-fixture.test.mjs`. Regenerate it in the same commit as the policy change or
+any sample-contract change; don't hand-edit it. It used to be hand-maintained, and drifted
+into asserting a policy this repository had already abandoned.
