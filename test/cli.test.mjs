@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   canonicalizeFetchedSpec,
   requireCanonicalClientSpecForTarget,
+  templateDirForTarget,
   validateOpenApiVersionForTarget,
   validateOptionsForTarget
 } from "../src/cli.mjs";
@@ -169,4 +170,17 @@ test("validateOpenApiVersionForTarget rejects a Swagger-style 2.0 contract for t
     () => validateOpenApiVersionForTarget({ swagger: "2.0" }, PYTHON_TARGET_CONFIG),
     /Unsupported OpenAPI version "2\.0"/
   );
+});
+
+test("templateDirForTarget returns the typescript-fetch override for the ts target only", async () => {
+  const { stat } = await import("node:fs/promises");
+  const tsDir = templateDirForTarget("ts");
+
+  assert.ok(tsDir, "the ts target must use the template override");
+  assert.match(tsDir, /typescript-fetch$/);
+  await stat(`${tsDir}/apis.mustache`);
+
+  assert.equal(templateDirForTarget("js"), null);
+  assert.equal(templateDirForTarget("php"), null);
+  assert.equal(templateDirForTarget("python"), null);
 });

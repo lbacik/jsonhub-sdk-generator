@@ -235,11 +235,29 @@ the header goes out per operation and a caller can still override it:
 def sync_detailed(id, *, client, accept: Union[Unset, str] = "application/json") -> ...
 ```
 
-`typescript-fetch` renders it as an optional `accept?: string` but drops the `default`, so
-the `ts` target can negotiate per call yet still sends nothing unless the caller passes it.
-Operations whose specification already declares an `Accept` parameter of its own (directly,
-through a `$ref`, or on the path item) are left alone, as are operations with no `2xx`
-body.
+`typescript-fetch` renders it as an optional `accept?: string` but drops the `default`.
+The `ts` target recovers it one layer down: `src/templates/typescript-fetch/apis.mustache`
+is a minimal override of the pinned generator's template (openapi-generator 7.21.0, see
+`openapitools.json`), applied for `ts` only via the CLI's `-t` flag. When the caller passes
+no `accept`, the operation's Canonical Client Spec default goes out (`application/json` for
+single-resource GETs, POSTs and PATCHes; `application/hal+json` for collection GETs); a
+caller-supplied value still wins, and other header parameters are untouched. `js` and `php`
+generate without the override and are unaffected. Re-sync the override when bumping the
+generator version in `openapitools.json`. Operations whose specification already declares an
+`Accept` parameter of its own (directly, through a `$ref`, or on the path item) are left
+alone, as are operations with no `2xx` body.
+
+The `ts` behaviour is guarded by a runtime test that needs Java, so it runs outside plain
+`npm test`:
+
+```bash
+npm run test:ts-runtime
+```
+
+It generates the `ts` SDK Surface from the committed sample API Contract through the CLI
+path, transpiles it with the pinned `typescript` devDependency (without installing the
+generated package's own dependencies), and drives it with a fake `fetchApi`, asserting on
+the `Accept` headers the generated SDK actually sends.
 
 The reduction is a pure document transformation (no network access, no code generation)
 and currently works for specifications in JSON format. The result is written as a

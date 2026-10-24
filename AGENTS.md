@@ -154,12 +154,23 @@ that looked complete.
 So `src/normalizer.mjs` states the choice as something both generators do render: alongside
 reducing `content`, each operation gains an `Accept` header parameter defaulting to the chosen 2xx
 representation. `openapi-python-client` turns that into a keyword-only argument carrying the
-default, so the right header goes out per operation and a caller can still override it;
-`typescript-fetch` renders it optional and drops the `default`, so `ts` can negotiate but still
-sends nothing unless the caller passes it (tracked separately - `ts` consumers compensate by hand
-today). Both halves are load-bearing: the media type picks the model, the parameter picks the
-header. Don't remove one assuming the other covers it - issue #14 was closed on exactly that
-assumption and had to be reopened.
+default, so the right header goes out per operation and a caller can still override it.
+`typescript-fetch` renders the parameter optional and drops the `default`, so the `ts` target
+recovers it one layer down: `src/templates/typescript-fetch/apis.mustache` - a minimal override
+of the pinned generator's template, applied for `ts` only via the CLI's `-t` flag - sends the
+parameter's default when the caller passes no `accept`, and the caller's value still wins.
+`js` and `php` are unaffected. Both halves are load-bearing: the media type picks the model, the
+parameter picks the header. Don't remove one assuming the other covers it - issue #14 was closed
+on exactly that assumption and had to be reopened.
+
+The override is a copy of openapi-generator 7.21.0's `typescript-fetch/apis.mustache` (the
+version pinned in `openapitools.json`), changed in one place and carrying a comment naming that
+version. Bumping the generator version in `openapitools.json` means re-syncing the override
+against the new template. The `ts` Accept behaviour itself is guarded at the highest seam by the
+runtime test `test-ts-runtime/accept-headers.mjs` (`npm run test:ts-runtime`, needs Java so it
+stays out of plain `npm test`): it generates the `ts` SDK Surface from the committed sample API
+Contract through the CLI path, transpiles it with the pinned `typescript` devDependency, and
+asserts on the headers the generated SDK actually sends.
 
 The `Accept` default follows the 2xx policy in `src/normalizer.mjs`: a collection read (a
 GET whose 2xx `application/json` schema resolves to `type: array`) defaults to
