@@ -15,6 +15,17 @@ const rootDir = resolve(__dirname, "..");
 const OPENAPI_GENERATOR_RUNNER = "openapi-generator";
 const OPENAPI_PYTHON_CLIENT_RUNNER = "openapi-python-client";
 
+// Minimal `typescript-fetch` template override (see
+// src/templates/typescript-fetch/apis.mustache, copied from the pinned
+// openapi-generator 7.21.0 in openapitools.json): it sends the operation's
+// Canonical Client Spec `Accept` default unless the caller passes `accept`.
+// Only the `ts` target uses it - `js` and `php` generate without `-t`.
+const TS_TEMPLATE_DIR = resolve(rootDir, "src/templates/typescript-fetch");
+
+function templateDirForTarget(target) {
+  return target === "ts" ? TS_TEMPLATE_DIR : null;
+}
+
 const SUPPORTED_OPENAPI_VERSIONS = ["3.0", "3.1"];
 
 const TARGETS = {
@@ -589,6 +600,12 @@ program
       generatorArgs.push("--skip-validate-spec");
     }
 
+    const templateDir = templateDirForTarget(options.target);
+
+    if (templateDir) {
+      generatorArgs.push("-t", templateDir);
+    }
+
     console.log(`Generating target "${options.target}" to ${outputDir}`);
 
     await runGenerator(generatorArgs);
@@ -606,4 +623,4 @@ program
 
 runIfMain(import.meta.url, program);
 
-export { canonicalizeFetchedSpec, validateOpenApiVersionForTarget, validateOptionsForTarget, requireCanonicalClientSpecForTarget };
+export { canonicalizeFetchedSpec, validateOpenApiVersionForTarget, validateOptionsForTarget, requireCanonicalClientSpecForTarget, templateDirForTarget };
