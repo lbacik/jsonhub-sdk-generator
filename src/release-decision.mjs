@@ -168,6 +168,79 @@ function compareSchemas(previousSpec, currentSpec) {
   return { breaking, additive };
 }
 
+// Resolves a response that is itself a `$ref` into
+// `components.responses`, so the representation comparison below sees the
+// content the operation actually carries - the normalizer reduces such
+// entries in place, in the shared component, rather than at the operation.
+function resolveResponseRef(spec, response) {
+  if (!isPlainObject(response) || typeof response.$ref !== "string") {
+    return response;
+  }
+
+  const match = response.$ref.match(/^#\/components\/responses\/(.+)$/);
+  if (!match) {
+    return response;
+  }
+
+  return spec?.components?.responses?.[decodeRefName(match[1])] ?? response;
+}
+
+function decodeRefName(encodedName) {
+  return decodeURIComponent(encodedName.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+function responseRepresentations(spec, operation) {
+  const representations = new Map();
+
+  for (const [statusCode, rawResponse] of Object.entries(operation?.responses ?? {})) {
+    const response = resolveResponseRef(spec, rawResponse);
+    if (!isPlainObject(response) || !isPlainObject(response.content)) {
+      continue;
+    }
+
+    representations.set(String(statusCode), Object.keys(response.content).sort().join(","));
+  }
+
+  return representations;
+}
+
+// Compares which representation each shared operation and status code
+// resolves to. A changed media type changes the generated models - and the
+// `Accept` parameter default the normalizer declares alongside them - so no
+// `^x.y.z` consumer may upgrade into it silently: every such change is
+// breaking. Operations added or removed are left to `compareOperations`, so
+// the same change is never reported twice.
+function compareResponseRepresentations(previousSpec, currentSpec) {
+  const previous = listOperations(previousSpec);
+  const current = listOperations(currentSpec);
+  const breaking = [];
+
+  for (const [operationKey, previousOperation] of previous) {
+    const currentOperation = current.get(operationKey);
+    if (!currentOperation) {
+      continue;
+    }
+
+    const previousRepresentations = responseRepresentations(previousSpec, previousOperation);
+    const currentRepresentations = responseRepresentations(currentSpec, currentOperation);
+
+    for (const [statusCode, previousMediaTypes] of previousRepresentations) {
+      if (!currentRepresentations.has(statusCode)) {
+        continue;
+      }
+
+      const currentMediaTypes = currentRepresentations.get(statusCode);
+      if (currentMediaTypes !== previousMediaTypes) {
+        breaking.push(
+          `response representation changed: ${operationKey} ${statusCode}: ${previousMediaTypes} -> ${currentMediaTypes}`
+        );
+      }
+    }
+  }
+
+  return { breaking, additive: [] };
+}
+
 // Takes the previous and current Canonical Client Spec and returns what
 // changed between them. Deliberately not "oasdiff" itself - a small
 // structural comparison is enough to classify severity, and keeping it here
@@ -176,9 +249,10 @@ function compareSchemas(previousSpec, currentSpec) {
 function compareCanonicalClientSpecs(previousSpec, currentSpec) {
   const operations = compareOperations(previousSpec, currentSpec);
   const schemas = compareSchemas(previousSpec, currentSpec);
+  const representations = compareResponseRepresentations(previousSpec, currentSpec);
 
   return {
-    breaking: [...operations.breaking, ...schemas.breaking],
+    breaking: [...operations.breaking, ...schemas.breaking, ...representations.breaking],
     additive: [...operations.additive, ...schemas.additive]
   };
 }

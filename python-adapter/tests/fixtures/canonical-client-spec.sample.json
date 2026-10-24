@@ -58,9 +58,9 @@
           "201": {
             "description": "Created",
             "content": {
-              "application/hal+json": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Definition.jsonhal"
+                  "$ref": "#/components/schemas/Definition"
                 }
               }
             }
@@ -73,7 +73,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "application/hal+json"
+              "default": "application/json"
             }
           }
         ]
@@ -187,7 +187,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "application/hal+json"
+              "default": "application/json"
             }
           }
         ],
@@ -204,9 +204,9 @@
           "200": {
             "description": "Updated",
             "content": {
-              "application/hal+json": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Definition.jsonhal"
+                  "$ref": "#/components/schemas/Definition"
                 }
               }
             }

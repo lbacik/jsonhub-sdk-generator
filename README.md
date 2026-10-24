@@ -158,17 +158,19 @@ reduces it before generation to exactly one representation per operation, follow
 shared policy — instead of the single global `--prefer-media-type` flag (removed):
 
 ```
-response 2xx (single-resource GET) -> application/json, falling back to application/hal+json
-response 2xx (everything else)     -> application/hal+json, falling back to application/json
-response 4xx/5xx                   -> application/problem+json
-request body                       -> application/json
-  PATCH                            -> application/merge-patch+json
-  OAuth forms                      -> application/x-www-form-urlencoded
+response 2xx (collection read)              -> application/hal+json, falling back to application/json
+response 2xx (every other 2xx with a body)  -> application/json, falling back to application/hal+json
+response 4xx/5xx                            -> application/problem+json
+request body                                -> application/json
+  PATCH                                     -> application/merge-patch+json
+  OAuth forms                               -> application/x-www-form-urlencoded
 ```
 
 The choice for `responses` is based on the status code and, for 2xx, on whether the
-operation is a single-resource GET (a GET whose path ends in a path parameter, e.g.
-`/entities/{id}`, as opposed to a collection GET like `/entities`). JsonHub's HAL
+operation is a collection read: a GET whose 2xx `application/json` schema, after
+resolving `$ref`, is `type: array` (how API Platform renders plain-JSON collections).
+Every other 2xx response carrying one resource — a POST 201, a PATCH 200, a
+single-resource GET, a report — resolves to plain `application/json`. JsonHub's HAL
 representation of a single resource carries its relations under `_links`/`_embedded`
 rather than as direct properties, so a model generated from the direct (non-HAL) schema
 needs the plain `application/json` representation; collection GETs still prefer
@@ -176,7 +178,9 @@ needs the plain `application/json` representation; collection GETs still prefer
 `requestBody` is based on the HTTP method and the presence of
 `application/x-www-form-urlencoded` in the content (OAuth forms). If none of the
 preferred types is present in `content`, the CLI keeps the first available type, so every
-operation always ends up with exactly one representation.
+operation always ends up with exactly one representation. The normalizer does not
+rewrite or compensate for producer HAL schemas; a Product whose contract misdescribes
+the wire fixes its own API (see `docs/adr/0003-plain-json-single-resource.md`).
 
 Choosing a representation is only half of the negotiation — the client also has to ask
 for it, and neither generator derives a request-side `Accept` header from a response's
@@ -214,9 +218,9 @@ rather than `openapi-generator-cli`, wrapped by a thin adapter in `python-adapte
 repository's per-SDK-Target toolchain policy (see `CONTEXT.md`'s definition of SDK Target and
 `AGENTS.md`), the adapter performs no representation selection of its own: it is handed the
 Canonical Client Spec described above — already reduced to one representation per operation, with
-success responses resolved to `application/hal+json` (or `application/json` for single-resource
-GETs), errors to `application/problem+json`, and each operation carrying an `Accept` parameter
-defaulting to its chosen representation — and does nothing but invoke
+collection reads resolved to `application/hal+json`, every other 2xx response with a body to
+`application/json`, errors to `application/problem+json`, and each operation carrying an `Accept`
+parameter defaulting to its chosen representation — and does nothing but invoke
 `openapi-python-client generate` on it.
 
 **One-time setup**, since `openapi-python-client` runs on its own Python/Poetry toolchain rather
@@ -245,9 +249,10 @@ longer drives any transformation of its own — there isn't one left on the Pyth
 reads a sample Canonical Client Spec fixture directly and asserts the invariants the Python
 generator depends on: exactly one representation per operation (carried over unchanged), that
 collection endpoints keep their total item count, page size, and current page — rewritten from
-JSON:API to HAL, since that's this repository's shared policy now — that single-resource GETs
-resolve to `application/json` with their relations inlined as direct properties, not under HAL's
-`_links`/`_embedded` (issue #14), and that every operation asks for the representation it declares
+JSON:API to HAL, since that's this repository's shared policy now — that every response carrying
+one resource resolves to `application/json` with its relations inlined as direct properties, not
+under HAL's `_links`/`_embedded` (issue #14), and that every operation asks for the representation
+it declares
 through a matching `Accept` header parameter, the half of issue #14 the media-type choice alone
 doesn't cover. Run it with:
 
