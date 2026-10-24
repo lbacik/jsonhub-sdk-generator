@@ -4,20 +4,28 @@
  * one shared policy instead of a single global "preferred media type" flag.
  *
  * Policy:
- *   response 2xx (single-resource GET) -> application/json, falling back to application/hal+json
- *   response 2xx (everything else)     -> application/hal+json, falling back to application/json
+ *   response 2xx (collection read)     -> application/hal+json, falling back to application/json
+ *   response 2xx (every other 2xx with a body) -> application/json, falling back to application/hal+json
  *   response 4xx/5xx                   -> application/problem+json
  *   request body                       -> application/json
  *     PATCH                            -> application/merge-patch+json
  *     OAuth forms                      -> application/x-www-form-urlencoded
  *
- * A single-resource GET is a GET operation whose path ends in a path
- * parameter (e.g. `/entities/{id}`), as opposed to a collection GET (e.g.
- * `/entities`). JsonHub's HAL representation of a single resource carries its
- * relations under `_links`/`_embedded` rather than as direct properties, so a
- * generated model built from the direct (non-HAL) schema needs the plain
- * `application/json` representation instead. Collection GETs still prefer
- * `application/hal+json`, since pagination needs the HAL envelope.
+ * A collection read is a GET whose 2xx `application/json` schema, after
+ * resolving `$ref`, is `type: array` (how API Platform renders plain-JSON
+ * collections). Every other 2xx response carrying one resource - a POST 201,
+ * a PATCH 200, a single-resource GET, a report - resolves to plain
+ * `application/json`. JsonHub's HAL representation of a single resource
+ * carries its relations under `_links`/`_embedded` rather than as direct
+ * properties, so a generated model built from the direct (non-HAL) schema
+ * needs the plain `application/json` representation instead. Collection GETs
+ * still prefer `application/hal+json`, since pagination needs the HAL
+ * envelope. This replaces the earlier path-shape test ("a GET whose path ends
+ * in a path parameter"), which could not classify a `POST /entities` or a
+ * report such as `GET /reports/dashboard`.
+ *
+ * The normalizer does not rewrite or compensate for producer HAL schemas: a
+ * Product whose contract misdescribes the wire fixes its own API.
  *
  * Choosing a representation is only half of the negotiation: the client also
  * has to ask for it. Neither SDK Target's generator derives a request-side
@@ -60,8 +68,8 @@ const HTTP_METHODS = new Set([
   "trace"
 ]);
 
-const SUCCESS_RESPONSE_MEDIA_TYPE_PREFERENCE = ["application/hal+json", "application/json"];
-const SINGLE_RESOURCE_READ_MEDIA_TYPE_PREFERENCE = ["application/json", "application/hal+json"];
+const COLLECTION_READ_MEDIA_TYPE_PREFERENCE = ["application/hal+json", "application/json"];
+const SINGLE_RESPONSE_MEDIA_TYPE_PREFERENCE = ["application/json", "application/hal+json"];
 const ERROR_RESPONSE_MEDIA_TYPE_PREFERENCE = ["application/problem+json"];
 const DEFAULT_REQUEST_BODY_MEDIA_TYPE_PREFERENCE = ["application/json"];
 const PATCH_REQUEST_BODY_MEDIA_TYPE_PREFERENCE = ["application/merge-patch+json", "application/json"];
@@ -80,26 +88,75 @@ function isSuccessStatusCode(statusCode) {
   return /^2/.test(String(statusCode).trim());
 }
 
-function responseMediaTypePreference(statusCode, { isSingleResourceRead = false } = {}) {
+function responseMediaTypePreference(statusCode, { isCollectionRead = false } = {}) {
   if (isErrorStatusCode(statusCode)) {
     return ERROR_RESPONSE_MEDIA_TYPE_PREFERENCE;
   }
 
-  return isSingleResourceRead
-    ? SINGLE_RESOURCE_READ_MEDIA_TYPE_PREFERENCE
-    : SUCCESS_RESPONSE_MEDIA_TYPE_PREFERENCE;
+  return isCollectionRead
+    ? COLLECTION_READ_MEDIA_TYPE_PREFERENCE
+    : SINGLE_RESPONSE_MEDIA_TYPE_PREFERENCE;
 }
 
-// A path "ends in a path parameter" when its last segment is a single
-// `{name}` template, e.g. `/entities/{id}` or `/entities/{id}/versions/{v}`.
-function endsWithPathParameter(path) {
-  const segments = String(path).split("/").filter(Boolean);
-  const lastSegment = segments.at(-1) ?? "";
-  return /^\{[^}]+\}$/.test(lastSegment);
+// Follows a `#/components/schemas/<name>` reference chain to the schema it
+// names, so the collection-read test below sees through the named schemas an
+// API-Platform contract points at. Anything that does not resolve locally (a
+// remote ref, a missing component, a cycle) is returned as-is and simply does
+// not count as an array.
+function resolveSchemaReference(document, schema) {
+  let current = schema;
+  const seen = new Set();
+
+  while (isPlainObject(current) && typeof current.$ref === "string") {
+    const match = current.$ref.match(/^#\/components\/schemas\/(.+)$/);
+    if (!match) {
+      return current;
+    }
+
+    const name = decodeJsonPointerSegment(match[1]);
+    if (seen.has(name)) {
+      return current;
+    }
+    seen.add(name);
+
+    const resolved = document?.components?.schemas?.[name];
+    if (!isPlainObject(resolved)) {
+      return current;
+    }
+    current = resolved;
+  }
+
+  return current;
 }
 
-function isSingleResourceGet(method, path) {
-  return String(method).toLowerCase() === "get" && endsWithPathParameter(path);
+// A collection read is a GET whose 2xx `application/json` schema, after
+// resolving `$ref`, is `type: array` - how API Platform renders plain-JSON
+// collections. The first 2xx response (in the contract's own order) that
+// offers `application/json` decides; a GET offering no `application/json` at
+// all is not a collection read, which is moot for the outcome either way -
+// both preference lists then fall back to whatever is offered.
+function isCollectionRead(document, operation, method) {
+  if (String(method).toLowerCase() !== "get") {
+    return false;
+  }
+
+  const responses = operation?.responses ?? {};
+  for (const [statusCode, rawResponse] of Object.entries(responses)) {
+    if (!isSuccessStatusCode(statusCode)) {
+      continue;
+    }
+
+    const response = resolveComponentRef(document, rawResponse);
+    const jsonMedia = response?.content?.["application/json"];
+    if (!isPlainObject(jsonMedia)) {
+      continue;
+    }
+
+    const schema = resolveSchemaReference(document, jsonMedia.schema);
+    return isPlainObject(schema) && schema.type === "array";
+  }
+
+  return false;
 }
 
 // Forms are identified by content rather than by path or operationId, so the
@@ -204,7 +261,7 @@ function declareAcceptHeaderParameter(operation, mediaType) {
   ];
 }
 
-function reduceOperationToCanonicalRepresentations(document, pathItem, operation, method, path) {
+function reduceOperationToCanonicalRepresentations(document, pathItem, operation, method) {
   const requestBody = resolveComponentRef(document, operation.requestBody);
   if (requestBody?.content) {
     requestBody.content = reduceContentToSingleMediaType(
@@ -217,7 +274,7 @@ function reduceOperationToCanonicalRepresentations(document, pathItem, operation
     return;
   }
 
-  const isSingleResourceRead = isSingleResourceGet(method, path);
+  const collectionRead = isCollectionRead(document, operation, method);
   let successMediaType = null;
 
   for (const [statusCode, rawResponse] of Object.entries(operation.responses)) {
@@ -228,7 +285,7 @@ function reduceOperationToCanonicalRepresentations(document, pathItem, operation
 
     response.content = reduceContentToSingleMediaType(
       response.content,
-      responseMediaTypePreference(statusCode, { isSingleResourceRead })
+      responseMediaTypePreference(statusCode, { isCollectionRead: collectionRead })
     );
 
     // The first 2xx wins - responses keep the contract's own order, so that is
@@ -364,7 +421,7 @@ function reduceToCanonicalClientSpec(document) {
         continue;
       }
 
-      reduceOperationToCanonicalRepresentations(canonical, pathItem, operation, method, path);
+      reduceOperationToCanonicalRepresentations(canonical, pathItem, operation, method);
     }
   }
 
@@ -376,7 +433,7 @@ function reduceToCanonicalClientSpec(document) {
 export {
   isErrorStatusCode,
   isSuccessStatusCode,
-  isSingleResourceGet,
+  isCollectionRead,
   isAcceptHeaderParameter,
   requestBodyMediaTypePreference,
   responseMediaTypePreference,

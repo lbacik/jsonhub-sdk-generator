@@ -159,6 +159,11 @@ today). Both halves are load-bearing: the media type picks the model, the parame
 header. Don't remove one assuming the other covers it - issue #14 was closed on exactly that
 assumption and had to be reopened.
 
+The `Accept` default follows the 2xx policy in `src/normalizer.mjs`: a collection read (a
+GET whose 2xx `application/json` schema resolves to `type: array`) defaults to
+`application/hal+json`, every other 2xx with a body defaults to `application/json`
+— so POST 201 and PATCH 200 ask for plain JSON too, not just single-resource GETs.
+
 Changing that policy also changes the Python SDK Target's conformance fixture
 (`python-adapter/tests/fixtures/canonical-client-spec.sample.json`), which is generated from the
 sample API Contract beside it by `npm run write-conformance-fixture` and guarded by

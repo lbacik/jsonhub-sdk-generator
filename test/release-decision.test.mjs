@@ -134,6 +134,108 @@ test("compareCanonicalClientSpecs treats an added schema as additive", () => {
   assert.ok(comparison.additive.some((change) => change.includes("schema added: Widget")));
 });
 
+// The normalizer's 2xx policy moved single responses (POST 201, PATCH 200)
+// from `application/hal+json` to `application/json`: the before/after pair
+// below is one JsonHub-shaped contract reduced under the old and the new
+// policy. The structural comparison looks at operations and schema fields
+// only, so without a representation comparison this would classify as
+// patch/additive and every `^x.y.z` consumer would upgrade into changed
+// models silently - the change has to read as breaking (major).
+function buildPolicyChangePair() {
+  function reduced({ postMediaType, patchMediaType }) {
+    return buildSpec({
+      paths: {
+        "/api/definitions": {
+          get: {
+            responses: { 200: { content: { "application/hal+json": {} } } },
+            parameters: [
+              {
+                name: "Accept",
+                in: "header",
+                required: false,
+                schema: { type: "string", default: "application/hal+json" }
+              }
+            ]
+          },
+          post: {
+            responses: { 201: { content: { [postMediaType]: {} } } },
+            parameters: [
+              {
+                name: "Accept",
+                in: "header",
+                required: false,
+                schema: { type: "string", default: postMediaType }
+              }
+            ]
+          }
+        },
+        "/api/definitions/{id}": {
+          get: {
+            responses: { 200: { content: { "application/json": {} } } },
+            parameters: [
+              {
+                name: "Accept",
+                in: "header",
+                required: false,
+                schema: { type: "string", default: "application/json" }
+              }
+            ]
+          },
+          patch: {
+            responses: { 200: { content: { [patchMediaType]: {} } } },
+            parameters: [
+              {
+                name: "Accept",
+                in: "header",
+                required: false,
+                schema: { type: "string", default: patchMediaType }
+              }
+            ]
+          }
+        }
+      },
+      schemas: BASE_SPEC.components.schemas
+    });
+  }
+
+  return {
+    before: reduced({
+      postMediaType: "application/hal+json",
+      patchMediaType: "application/hal+json"
+    }),
+    after: reduced({ postMediaType: "application/json", patchMediaType: "application/json" })
+  };
+}
+
+test("compareCanonicalClientSpecs treats a changed response representation as breaking", () => {
+  const { before, after } = buildPolicyChangePair();
+  const comparison = compareCanonicalClientSpecs(before, after);
+
+  assert.ok(
+    comparison.breaking.some((change) =>
+      change.includes("response representation changed: POST /api/definitions 201")
+    )
+  );
+  assert.ok(
+    comparison.breaking.some((change) =>
+      change.includes("response representation changed: PATCH /api/definitions/{id} 200")
+    )
+  );
+  assert.equal(comparison.additive.length, 0);
+});
+
+test("the single-response policy change releases as a major bump", () => {
+  const { before, after } = buildPolicyChangePair();
+  const verdict = decide({
+    previousCanonicalClientSpec: before,
+    currentCanonicalClientSpec: after,
+    currentSdkSurface: CHANGED_SURFACE
+  });
+
+  assert.equal(verdict.shouldRelease, true);
+  assert.equal(verdict.bump, "major");
+});
+
 test("compareCanonicalClientSpecs treats a field newly made required as breaking", () => {
   const current = buildSpec({
     paths: BASE_SPEC.paths,

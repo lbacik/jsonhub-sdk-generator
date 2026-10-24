@@ -12,7 +12,6 @@ JSON:API to HAL, per this repository's Canonical Client Spec policy.
 """
 
 import json
-import re
 import unittest
 from pathlib import Path
 from typing import Any
@@ -23,23 +22,61 @@ from typing import Any
 # fixture by hand is how it drifted away from the policy it encodes before
 # issue #14's follow-up (see AGENTS.md); edit the sample contract instead.
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "canonical-client-spec.sample.json"
+CONTRACT_PATH = Path(__file__).parent / "fixtures" / "api-contract.sample.json"
 
 HAL_JSON = "application/hal+json"
 PLAIN_JSON = "application/json"
 PROBLEM_JSON = "application/problem+json"
 
 
-def is_single_resource_get(method: str, path: str) -> bool:
-    """A GET whose path ends in a path parameter, e.g. `/api/entities/{id}`.
+def resolve_contract_schema(
+    schemas: dict[str, Any], schema: Any, _seen: frozenset[str] = frozenset()
+) -> Any:
+    """Follow a `#/components/schemas/<name>` reference chain to the schema it names.
 
-    Deliberately mirrors `isSingleResourceGet` in `src/normalizer.mjs`, down to
-    the segment pattern: this suite runs on its own toolchain, with nothing but
-    the fixture, so the alternative is a hand-listed set of paths - the kind of
-    hand-maintenance that let the fixture drift in the first place.
+    Deliberately mirrors `resolveSchemaReference` in `src/normalizer.mjs`: this
+    suite runs on its own toolchain, so the alternative is a hand-listed set of
+    collection paths - the kind of hand-maintenance that let the fixture drift
+    in the first place.
     """
 
-    last_segment = path.rstrip("/").rsplit("/", 1)[-1]
-    return method.lower() == "get" and re.fullmatch(r"\{[^}]+\}", last_segment) is not None
+    current = schema
+    seen = set(_seen)
+    while isinstance(current, dict) and isinstance(current.get("$ref"), str):
+        ref = current["$ref"]
+        if not ref.startswith("#/components/schemas/"):
+            return current
+        name = ref.removeprefix("#/components/schemas/")
+        if name in seen:
+            return current
+        seen.add(name)
+        resolved = schemas.get(name)
+        if not isinstance(resolved, dict):
+            return current
+        current = resolved
+    return current
+
+
+def is_collection_read(contract: dict[str, Any], operation: dict[str, Any], method: str) -> bool:
+    """A GET whose 2xx `application/json` schema, after resolving `$ref`, is
+    `type: array` - how API Platform renders plain-JSON collections.
+
+    Deliberately mirrors `isCollectionRead` in `src/normalizer.mjs`: the first
+    2xx response (in the contract's own order) offering `application/json`
+    decides.
+    """
+
+    if method.lower() != "get":
+        return False
+    for status, response in (operation.get("responses") or {}).items():
+        if not str(status).startswith("2"):
+            continue
+        media = (response or {}).get("content", {}).get(PLAIN_JSON)
+        if not isinstance(media, dict):
+            continue
+        schema = resolve_contract_schema(contract["components"]["schemas"], media.get("schema"))
+        return isinstance(schema, dict) and schema.get("type") == "array"
+    return False
 
 
 def resolve_schema(schemas: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +103,7 @@ class CanonicalClientSpecConformanceTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.spec: dict[str, Any] = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         cls.schemas: dict[str, Any] = cls.spec["components"]["schemas"]
+        cls.contract: dict[str, Any] = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
     def test_uses_one_representation_per_operation(self) -> None:
         for path_item in self.spec["paths"].values():
@@ -122,31 +160,68 @@ class CanonicalClientSpecConformanceTests(unittest.TestCase):
         self.assertNotIn("_links", properties)
         self.assertNotIn("_embedded", properties)
 
-    def test_single_resource_reads_resolve_to_plain_json(self) -> None:
-        """The rule behind issue #14, applied to every single-resource GET
-        rather than to `/api/entities/{id}` alone: the HAL representation of a
-        single resource hides relations under `_links`/`_embedded`, so a
-        generated model built from the direct schema needs `application/json`.
+    def test_responses_carrying_one_resource_resolve_to_plain_json(self) -> None:
+        """The rule behind issue #14, applied to every response carrying one
+        resource rather than to single-resource GETs alone: the HAL
+        representation of a single resource hides relations under
+        `_links`/`_embedded`, so a generated model built from the direct
+        schema needs `application/json`. That covers POST 201, PATCH 200 and
+        report GETs - shapes a path-based rule ("a GET whose path ends in a
+        path parameter") cannot classify.
 
-        `test/conformance-fixture.test.mjs` keeps every single-resource GET in
-        the sample contract offering both representations, so each of these is
-        a real choice rather than the only one available; the fallback case (an
-        operation the API offers no `application/json` for) is covered by
-        `test/normalizer.test.mjs` on the generator side.
+        `test/conformance-fixture.test.mjs` keeps every 2xx response with a
+        body in the sample contract offering both representations, so each of
+        these is a real choice rather than the only one available; the fallback
+        case (an operation the API offers no `application/json` for) is covered
+        by `test/normalizer.test.mjs` on the generator side.
         """
 
-        single_resource_reads = [
-            (method, path, operation)
-            for path, path_item in self.spec["paths"].items()
+        single_responses = [
+            (method, path, status, response)
+            for path, path_item in self.contract["paths"].items()
             for method, operation in path_item.items()
-            if isinstance(operation, dict) and is_single_resource_get(method, path)
+            if isinstance(operation, dict)
+            for status, response in (operation.get("responses") or {}).items()
+            if (
+                str(status).startswith("2")
+                and isinstance(response, dict)
+                and "content" in response
+                and not is_collection_read(self.contract, operation, method)
+            )
         ]
 
-        self.assertGreater(len(single_resource_reads), 1)
+        self.assertGreater(len(single_responses), 1)
 
-        for method, path, operation in single_resource_reads:
-            with self.subTest(method=method, path=path):
-                self.assertEqual(list(operation["responses"]["200"]["content"]), [PLAIN_JSON])
+        for method, path, status, _response in single_responses:
+            with self.subTest(method=method, path=path, status=status):
+                operation = self.spec["paths"][path][method]
+                response = operation["responses"][status]
+                self.assertEqual(list(response["content"]), [PLAIN_JSON])
+
+    def test_collection_reads_resolve_to_hal_json(self) -> None:
+        """The other half of the policy: a GET whose 2xx `application/json`
+        schema is `type: array` keeps the HAL envelope, since pagination needs
+        it. Classified from the sample contract's schemas, exactly as
+        `src/normalizer.mjs` classifies the real one.
+        """
+
+        collection_reads = [
+            (method, path, status)
+            for path, path_item in self.contract["paths"].items()
+            for method, operation in path_item.items()
+            if isinstance(operation, dict)
+            for status in (operation.get("responses") or {})
+            if str(status).startswith("2")
+            and is_collection_read(self.contract, operation, method)
+        ]
+
+        self.assertGreater(len(collection_reads), 0)
+
+        for method, path, status in collection_reads:
+            with self.subTest(method=method, path=path, status=status):
+                operation = self.spec["paths"][path][method]
+                response = operation["responses"][status]
+                self.assertEqual(list(response["content"]), [HAL_JSON])
 
     def test_every_operation_asks_for_the_representation_it_declares(self) -> None:
         """Regression for issue #14: choosing one representation per operation

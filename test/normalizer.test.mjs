@@ -4,8 +4,8 @@ import { test } from "node:test";
 import {
   fillMissingArrayItemSchemas,
   isAcceptHeaderParameter,
+  isCollectionRead,
   isErrorStatusCode,
-  isSingleResourceGet,
   isSuccessStatusCode,
   pruneUnreachableSchemas,
   reduceContentToSingleMediaType,
@@ -30,8 +30,15 @@ test("isErrorStatusCode treats everything else as success", () => {
   assert.equal(isErrorStatusCode("default"), false);
 });
 
-test("responseMediaTypePreference prefers hal+json then json for success", () => {
+test("responseMediaTypePreference prefers json then hal+json for a single response", () => {
   assert.deepEqual(responseMediaTypePreference("200"), [
+    "application/json",
+    "application/hal+json"
+  ]);
+});
+
+test("responseMediaTypePreference prefers hal+json then json for a collection read", () => {
+  assert.deepEqual(responseMediaTypePreference("200", { isCollectionRead: true }), [
     "application/hal+json",
     "application/json"
   ]);
@@ -41,31 +48,60 @@ test("responseMediaTypePreference resolves errors to problem+json only", () => {
   assert.deepEqual(responseMediaTypePreference("404"), ["application/problem+json"]);
 });
 
-test("responseMediaTypePreference prefers json then hal+json for single-resource reads", () => {
-  assert.deepEqual(responseMediaTypePreference("200", { isSingleResourceRead: true }), [
-    "application/json",
-    "application/hal+json"
-  ]);
-});
-
-test("responseMediaTypePreference still resolves single-resource error responses to problem+json", () => {
-  assert.deepEqual(responseMediaTypePreference("404", { isSingleResourceRead: true }), [
+test("responseMediaTypePreference still resolves collection error responses to problem+json", () => {
+  assert.deepEqual(responseMediaTypePreference("404", { isCollectionRead: true }), [
     "application/problem+json"
   ]);
 });
 
-test("isSingleResourceGet is true for a GET whose path ends in a path parameter", () => {
-  assert.equal(isSingleResourceGet("get", "/api/entities/{id}"), true);
-  assert.equal(isSingleResourceGet("GET", "/api/entities/{id}"), true);
+function collectionContract(jsonSchema) {
+  return {
+    openapi: "3.1.0",
+    info: { title: "Test API", version: "1.0.0" },
+    paths: {
+      "/api/entities": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/json": { schema: jsonSchema },
+                "application/hal+json": { schema: { $ref: "#/components/schemas/EntityCollection" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    components: {
+      schemas: {
+        Entity: { type: "object" },
+        EntityCollection: { type: "object" },
+        EntityList: { type: "array", items: { $ref: "#/components/schemas/Entity" } }
+      }
+    }
+  };
+}
+
+test("isCollectionRead is true for a GET whose json schema is an array", () => {
+  const document = collectionContract({ type: "array", items: { type: "string" } });
+  assert.equal(isCollectionRead(document, document.paths["/api/entities"].get, "get"), true);
 });
 
-test("isSingleResourceGet is false for a GET on a collection path", () => {
-  assert.equal(isSingleResourceGet("get", "/api/entities"), false);
+test("isCollectionRead is true for a GET whose json schema is an array through a $ref", () => {
+  const document = collectionContract({ $ref: "#/components/schemas/EntityList" });
+  assert.equal(isCollectionRead(document, document.paths["/api/entities"].get, "get"), true);
 });
 
-test("isSingleResourceGet is false for non-GET methods, even on a single-resource path", () => {
-  assert.equal(isSingleResourceGet("patch", "/api/entities/{id}"), false);
-  assert.equal(isSingleResourceGet("post", "/api/entities/{id}"), false);
+test("isCollectionRead is false for a GET whose json schema is a single object", () => {
+  const document = collectionContract({ $ref: "#/components/schemas/Entity" });
+  assert.equal(isCollectionRead(document, document.paths["/api/entities"].get, "get"), false);
+});
+
+test("isCollectionRead is false for non-GET methods, even with an array json schema", () => {
+  const document = collectionContract({ type: "array", items: { type: "string" } });
+  const operation = document.paths["/api/entities"].get;
+  assert.equal(isCollectionRead(document, operation, "post"), false);
+  assert.equal(isCollectionRead(document, operation, "patch"), false);
 });
 
 test("requestBodyMediaTypePreference defaults to json", () => {
@@ -184,7 +220,7 @@ test("every operation ends with exactly one representation, for both request bod
   assert.equal(Object.keys(patchOperation.responses[200].content).length, 1);
 });
 
-test("success responses resolve to hal+json where the API offers it", () => {
+test("a collection GET resolves to hal+json where the API offers it", () => {
   const spec = buildSpec({
     paths: {
       "/entities": {
@@ -194,7 +230,12 @@ test("success responses resolve to hal+json where the API offers it", () => {
               content: {
                 "application/ld+json": { schema: { $ref: "#/components/schemas/Entities.jsonld" } },
                 "application/hal+json": { schema: { $ref: "#/components/schemas/Entities.jsonhal" } },
-                "application/json": { schema: { $ref: "#/components/schemas/Entities" } }
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Entity" }
+                  }
+                }
               }
             }
           }
@@ -204,7 +245,36 @@ test("success responses resolve to hal+json where the API offers it", () => {
     schemas: {
       "Entities.jsonld": { type: "object" },
       "Entities.jsonhal": { type: "object" },
-      Entities: { type: "object" }
+      Entity: { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+  assert.deepEqual(Object.keys(canonical.paths["/entities"].get.responses[200].content), [
+    "application/hal+json"
+  ]);
+});
+
+test("a collection GET resolves to hal+json when its json schema is an array through a $ref", () => {
+  const spec = buildSpec({
+    paths: {
+      "/entities": {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Entities.jsonhal" } },
+                "application/json": { schema: { $ref: "#/components/schemas/EntityList" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      "Entities.jsonhal": { type: "object" },
+      EntityList: { type: "array", items: { $ref: "#/components/schemas/Entity" } },
+      Entity: { type: "object" }
     }
   });
 
@@ -240,10 +310,32 @@ test("success responses resolve to plain json where hal+json is not offered", ()
   ]);
 });
 
-test("a single-resource GET resolves to plain json even where hal+json is also offered", () => {
+test("POST 201, PATCH 200 and a non-collection GET resolve to plain json where offered", () => {
   const spec = buildSpec({
     paths: {
+      "/api/entities": {
+        post: {
+          responses: {
+            201: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Entity.jsonhal" } },
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        }
+      },
       "/api/entities/{id}": {
+        patch: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Entity.jsonhal" } },
+                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+              }
+            }
+          }
+        },
         get: {
           responses: {
             200: {
@@ -255,13 +347,13 @@ test("a single-resource GET resolves to plain json even where hal+json is also o
           }
         }
       },
-      "/api/entities": {
+      "/api/reports/dashboard": {
         get: {
           responses: {
             200: {
               content: {
-                "application/hal+json": { schema: { $ref: "#/components/schemas/EntityCollection" } },
-                "application/json": { schema: { $ref: "#/components/schemas/EntityCollection.plain" } }
+                "application/hal+json": { schema: { $ref: "#/components/schemas/Dashboard.jsonhal" } },
+                "application/json": { schema: { $ref: "#/components/schemas/Dashboard" } }
               }
             }
           }
@@ -271,28 +363,36 @@ test("a single-resource GET resolves to plain json even where hal+json is also o
     schemas: {
       "Entity.jsonhal": { type: "object" },
       Entity: { type: "object" },
-      EntityCollection: { type: "object" },
-      "EntityCollection.plain": { type: "object" }
+      "Dashboard.jsonhal": { type: "object" },
+      Dashboard: { type: "object" }
     }
   });
 
   const canonical = reduceToCanonicalClientSpec(spec);
 
+  assert.deepEqual(Object.keys(canonical.paths["/api/entities"].post.responses[201].content), [
+    "application/json"
+  ]);
+  assert.deepEqual(
+    Object.keys(canonical.paths["/api/entities/{id}"].patch.responses[200].content),
+    ["application/json"]
+  );
   assert.deepEqual(Object.keys(canonical.paths["/api/entities/{id}"].get.responses[200].content), [
     "application/json"
   ]);
-  assert.deepEqual(Object.keys(canonical.paths["/api/entities"].get.responses[200].content), [
-    "application/hal+json"
-  ]);
+  assert.deepEqual(
+    Object.keys(canonical.paths["/api/reports/dashboard"].get.responses[200].content),
+    ["application/json"]
+  );
 });
 
-test("a single-resource GET falls back to hal+json when json is not offered", () => {
+test("a single response falls back to hal+json when json is not offered", () => {
   const spec = buildSpec({
     paths: {
-      "/api/entities/{id}": {
-        get: {
+      "/api/entities": {
+        post: {
           responses: {
-            200: {
+            201: {
               content: {
                 "application/hal+json": { schema: { $ref: "#/components/schemas/Entity.jsonhal" } }
               }
@@ -308,7 +408,7 @@ test("a single-resource GET falls back to hal+json when json is not offered", ()
 
   const canonical = reduceToCanonicalClientSpec(spec);
 
-  assert.deepEqual(Object.keys(canonical.paths["/api/entities/{id}"].get.responses[200].content), [
+  assert.deepEqual(Object.keys(canonical.paths["/api/entities"].post.responses[201].content), [
     "application/hal+json"
   ]);
 });
@@ -784,7 +884,7 @@ test("isAcceptHeaderParameter matches an Accept header parameter case-insensitiv
   assert.equal(isAcceptHeaderParameter(null), false);
 });
 
-test("a single-resource GET declares an Accept parameter defaulting to plain json", () => {
+test("a non-collection GET declares an Accept parameter defaulting to plain json", () => {
   const spec = buildSpec({
     paths: {
       "/api/entities/{id}": {
@@ -833,7 +933,12 @@ test("a collection GET declares an Accept parameter defaulting to hal+json", () 
                 "application/hal+json": {
                   schema: { $ref: "#/components/schemas/EntityCollection" }
                 },
-                "application/json": { schema: { $ref: "#/components/schemas/Entity" } }
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Entity" }
+                  }
+                }
               }
             }
           }
@@ -869,6 +974,9 @@ test("the Accept parameter follows the operation's own 2xx representation, not i
               content: {
                 "application/hal+json": {
                   schema: { $ref: "#/components/schemas/Definition.jsonhal" }
+                },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Definition" }
                 }
               }
             },
@@ -894,7 +1002,41 @@ test("the Accept parameter follows the operation's own 2xx representation, not i
 
   assert.equal(
     acceptParameterOf(canonical.paths["/api/definitions"].post).schema.default,
-    "application/hal+json"
+    "application/json"
+  );
+});
+
+test("a PATCH declares an Accept parameter defaulting to plain json", () => {
+  const spec = buildSpec({
+    paths: {
+      "/api/definitions/{id}": {
+        patch: {
+          responses: {
+            200: {
+              content: {
+                "application/hal+json": {
+                  schema: { $ref: "#/components/schemas/Definition.jsonhal" }
+                },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Definition" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    schemas: {
+      Definition: { type: "object" },
+      "Definition.jsonhal": { type: "object" }
+    }
+  });
+
+  const canonical = reduceToCanonicalClientSpec(spec);
+
+  assert.equal(
+    acceptParameterOf(canonical.paths["/api/definitions/{id}"].patch).schema.default,
+    "application/json"
   );
 });
 
