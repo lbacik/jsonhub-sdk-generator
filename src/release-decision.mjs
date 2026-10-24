@@ -21,7 +21,7 @@
  * All three detectors look at the API Contract, the generated SDK Surface,
  * and the toolchain pin - never at the pipeline-owned package metadata
  * (src/package-metadata.mjs) or the hand-owned metadata in
- * manifests/<target>/, both of which are applied later, by
+ * products/<product>/<target>/, both of which are applied later, by
  * src/write-package-metadata.mjs, and only once this verdict already says to
  * release. A change confined to those therefore cannot trigger a release on
  * its own; `force` is the deliberate escape hatch for rolling one out.

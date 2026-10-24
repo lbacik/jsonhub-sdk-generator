@@ -123,15 +123,17 @@ Exception: `src/normalizer.mjs` deliberately hardcodes the media type selection 
 shared policy instead of a configurable flag, so the SDK Targets can no longer drift apart
 — not an abandonment of the rule above.
 
-Exception: `src/package-metadata.mjs` deliberately hardcodes the unified `jsonhub-sdk` package
-name (the language suffix belongs to the repository name, not the package name — a registry is
-already the namespace for its own language), the npm tarball's `files` allowlist, and the split
-between pipeline-owned and hand-owned manifest fields
+Exception: `src/package-metadata.mjs` deliberately hardcodes the naming convention (one package
+name per Product across registries, with the language suffix on the repository name, not the
+package name — a registry is already the namespace for its own language), the npm tarball's
+`files` allowlist, and the split between pipeline-owned and hand-owned manifest fields
 (see `CONTEXT.md` and the "Package metadata and changelog" section of `README.md`). Same
 reasoning as the exception above — these are one-time domain decisions, not per-invocation
 configuration; `files` in particular has to hold on every run, since a published npm version
-can't be cleanly unpublished. The hand-owned fields themselves live outside `src/`, in
-`manifests/<target>/`, since they are owned by a human, not by this module.
+can't be cleanly unpublished. The name itself is not hardcoded: it is Product data, resolved
+from `products/<product>/product.json` through `src/product.mjs`. The hand-owned fields
+themselves live outside `src/`, in `products/<product>/<target>/`, since they are owned by a
+human, not by this module.
 
 Exception: `python-adapter/` carries its own Python/Poetry toolchain rather than reusing the
 Node one, and `src/cli.mjs` shells out to it (`poetry run openapi-python-client`) instead of

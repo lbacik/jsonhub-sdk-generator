@@ -10,7 +10,7 @@ set -euo pipefail
 # CONTEXT.md and docs/adr/0001-sdk-versioning.md for the domain vocabulary.
 #
 # Required environment variables: GENERATOR_DIR, TARGET_DIR (read-only here),
-# TARGET (ts | python), API_URL, WORK_DIR.
+# PRODUCT (e.g. jsonhub), TARGET (ts | python), API_URL, WORK_DIR.
 #
 # Optional environment variables:
 #   FORCE_RELEASE   when "1", release even though the API Contract and the
@@ -18,7 +18,7 @@ set -euo pipefail
 #                   only ever look at the API Contract, the SDK Surface and
 #                   the toolchain pin, so a change confined to the
 #                   pipeline-owned package metadata (src/package-metadata.mjs)
-#                   or the hand-owned metadata (manifests/<target>/) is
+#                   or the hand-owned metadata (products/<product>/<target>/) is
 #                   invisible to them and needs this to roll out. It skips the
 #                   early exit below so generation still happens - a forced
 #                   run releases a genuinely regenerated SDK Surface, not a
@@ -34,6 +34,7 @@ set -euo pipefail
 
 : "${GENERATOR_DIR:?}"
 : "${TARGET_DIR:?}"
+: "${PRODUCT:?}"
 : "${TARGET:?}"
 : "${API_URL:?}"
 : "${WORK_DIR:?}"
@@ -41,22 +42,23 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$GENERATOR_DIR/scripts/lib.sh"
 
-# The unified package name every SDK Target publishes under, and so the same
-# string for every target - src/package-metadata.mjs owns that convention and
-# writes it into the final manifest; the language suffix belongs to the
-# repository name, not to the package name. Not per-target because src/cli.mjs
-# already underscores it for python (a Python module name can't contain
-# hyphens), so python generates the jsonhub_sdk module and
+# The package name the generator builds under: the Product's one package name
+# (src/product.mjs resolves it from products/<product>/product.json). One name
+# per Product across registries, with the language suffix on the repository
+# name only - that convention stays hardcoded policy, see CONTEXT.md and the
+# "Package metadata and changelog" section of README.md. Not per-target here
+# because src/cli.mjs already underscores it for python (a Python module name
+# can't contain hyphens), so python generates the underscored module and
 # write-package-metadata.mjs then overwrites [tool.poetry].name with the
-# hyphenated "jsonhub-sdk" PyPI distribution name - see CONTEXT.md and the
-# "Package metadata and changelog" section of README.md.
-CLI_PACKAGE_NAME="jsonhub-sdk"
+# hyphenated PyPI distribution name.
+resolve_product "$WORK_DIR/resolution.json"
+CLI_PACKAGE_NAME="$(json_field "$WORK_DIR/resolution.json" packageName)"
 
 # The one place this script (and publish-to-target.sh) branches per SDK
 # Target: the manifest file each ecosystem's generator writes, and how to read
-# that manifest's version field. Add a target here only once
-# src/package-metadata.mjs's PACKAGE_NAME_BY_TARGET and
-# manifests/<target>/package.metadata.json also know about it.
+# that manifest's version field. Add a target here only once it is enabled in a
+# Product's product.json with hand-owned metadata at
+# products/<product>/<target>/package.metadata.json to go with it.
 case "$TARGET" in
   ts)
     MANIFEST_FILE="package.json"

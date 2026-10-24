@@ -3,8 +3,9 @@ set -euo pipefail
 
 # The end-to-end SDK pipeline run for the python SDK Target: fetch the API
 # Contract, reduce+generate the SDK Surface, decide whether and how much to
-# release, then commit and tag into the SDK Target's own repository
-# (jsonhub-sdk-python). Mirrors scripts/release-ts.sh - the two SDK Targets
+# release, then commit and tag into the Product's python SDK repository
+# (resolved from products/<product>/product.json). Mirrors
+# scripts/release-ts.sh - the two SDK Targets
 # differ only in their code generator and their registry (see CONTEXT.md and
 # AGENTS.md's per-SDK-Target toolchain policy), so this delegates to the same
 # two single-purpose scripts, kept apart per AGENTS.md ("avoid mixing
@@ -16,7 +17,8 @@ set -euo pipefail
 #
 # Required environment variables:
 #   GENERATOR_DIR        checkout of this repository
-#   TARGET_DIR            checkout of the jsonhub-sdk-python repository, pushable
+#   TARGET_DIR            checkout of the Product's python SDK repository, pushable
+#   PRODUCT               Product to release, e.g. jsonhub (see products/)
 #   API_URL               URL of the live API Contract (OpenAPI JSON)
 #   SOURCE_API_VERSION    API Release this run generates the SDK Surface from, e.g. v0.9.3
 #
@@ -28,9 +30,11 @@ set -euo pipefail
 
 : "${GENERATOR_DIR:?}"
 : "${TARGET_DIR:?}"
+: "${PRODUCT:?}"
 : "${API_URL:?}"
 : "${SOURCE_API_VERSION:?}"
 
+export PRODUCT
 export TARGET="python"
 export WORK_DIR="${WORK_DIR:-$(mktemp -d)}"
 

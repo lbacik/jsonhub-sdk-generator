@@ -365,7 +365,7 @@ const cases = [
     expected: { shouldRelease: false, bump: null, reason: "sdk-surface-unchanged" }
   },
   // force exists because none of the three detectors can see a change
-  // confined to src/package-metadata.mjs or manifests/<target>/ - those are
+  // confined to src/package-metadata.mjs or products/<product>/<target>/ - those are
   // applied by src/write-package-metadata.mjs, after this verdict.
   {
     name: "force releases an otherwise unchanged SDK Target as a patch",

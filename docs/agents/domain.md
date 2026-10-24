@@ -7,7 +7,7 @@ This repo is **single-context**: one `CONTEXT.md` and one `docs/adr/` at the roo
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root — the glossary for SDK generation and release.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in. Currently `0001`, on SDK versioning, and `0003`, on plain JSON for single-resource responses.
+- **`docs/adr/`** — read ADRs that touch the area you're about to work in. Currently `0001`, on SDK versioning, `0002`, on serving several Products from one generator, and `0003`, on plain JSON for single-resource responses.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
 
