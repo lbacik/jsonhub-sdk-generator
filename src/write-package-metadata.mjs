@@ -54,6 +54,7 @@ async function run(options) {
 
   const manifest = build({
     target: options.target,
+    packageName: options.packageName,
     generatedManifest,
     handOwnedMetadata,
     version,
@@ -81,9 +82,13 @@ program
   .description(
     "Writes the pipeline-owned package metadata (name, version, Source API Version) into a " +
       "regenerated SDK Target's manifest, preserves its hand-owned fields (author, licence, " +
-      "repository, keywords), and updates its changelog's compatibility table."
+      "repository, keywords, and - npm only - an optional homepage), and updates its changelog's compatibility table."
   )
   .requiredOption("--target <target>", "SDK Target, e.g. ts")
+  .requiredOption(
+    "--package-name <name>",
+    "Package name from the Product's product.json, e.g. jsonhub-sdk (resolved via src/resolve-product.mjs)"
+  )
   .requiredOption(
     "--manifest <file>",
     "Regenerated package manifest to update in place, e.g. generated/ts/package.json",

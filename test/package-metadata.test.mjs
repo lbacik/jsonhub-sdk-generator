@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  unifiedPackageName,
   applyBump,
   buildPackageManifest,
   buildPoetryManifest,
   HAND_OWNED_FIELDS,
+  OPTIONAL_HAND_OWNED_FIELDS,
   POETRY_HAND_OWNED_FIELDS,
   NPM_PUBLISHED_FILES
 } from "../src/package-metadata.mjs";
@@ -36,16 +36,35 @@ const generatedManifest = {
   devDependencies: { typescript: "^4.0 || ^5.0" }
 };
 
-// The language suffix lives in the repository name, never in the package name:
-// a registry is already the namespace for its own language, so every SDK
-// Target publishes under one name.
-test("unifiedPackageName is the same registry-agnostic jsonhub-sdk for every SDK Target", () => {
-  assert.equal(unifiedPackageName("ts"), "jsonhub-sdk");
-  assert.equal(unifiedPackageName("python"), "jsonhub-sdk");
+// The package name is Product data, resolved through src/product.mjs - the
+// builders take it as input rather than deriving it from the target.
+test("buildPackageManifest writes the given package name, not one derived from the target", () => {
+  for (const packageName of ["jsonhub-sdk", "pay-subscriptions-sdk"]) {
+    const manifest = buildPackageManifest({
+      target: "ts",
+      packageName,
+      generatedManifest,
+      handOwnedMetadata,
+      version: "1.3.0",
+      sourceApiVersion: "v0.9.3"
+    });
+
+    assert.equal(manifest.name, packageName);
+  }
 });
 
-test("unifiedPackageName rejects a target with no naming convention yet", () => {
-  assert.throws(() => unifiedPackageName("php"), /php/);
+test("buildPackageManifest rejects a missing package name", () => {
+  assert.throws(
+    () =>
+      buildPackageManifest({
+        target: "ts",
+        generatedManifest,
+        handOwnedMetadata,
+        version: "1.3.0",
+        sourceApiVersion: "v0.9.3"
+      }),
+    /package name/
+  );
 });
 
 test("applyBump bumps patch without touching major/minor", () => {
@@ -71,6 +90,7 @@ test("applyBump rejects an unknown bump level", () => {
 test("buildPackageManifest writes the pipeline-owned fields", () => {
   const manifest = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest,
     handOwnedMetadata,
     version: "1.3.0",
@@ -85,6 +105,7 @@ test("buildPackageManifest writes the pipeline-owned fields", () => {
 test("buildPackageManifest overwrites hand-owned fields with the maintained values, replacing generator placeholders", () => {
   const manifest = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest,
     handOwnedMetadata,
     version: "1.3.0",
@@ -99,6 +120,37 @@ test("buildPackageManifest overwrites hand-owned fields with the maintained valu
   assert.notEqual(manifest.repository.url, "https://github.com/GIT_USER_ID/GIT_REPO_ID.git");
 });
 
+// `homepage` is the one hand-owned field that may be absent: written when the
+// Product provides it, omitted otherwise - unlike the required four, whose
+// absence means a generator placeholder slipped through.
+test("buildPackageManifest writes homepage when the hand-owned metadata provides it", () => {
+  const manifest = buildPackageManifest({
+    target: "ts",
+    packageName: "jsonhub-sdk",
+    generatedManifest,
+    handOwnedMetadata: { ...handOwnedMetadata, homepage: "https://jsonhub.cloud" },
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.equal(manifest.homepage, "https://jsonhub.cloud");
+});
+
+test("buildPackageManifest omits homepage when the hand-owned metadata has none", () => {
+  assert.ok(!("homepage" in handOwnedMetadata));
+
+  const manifest = buildPackageManifest({
+    target: "ts",
+    packageName: "jsonhub-sdk",
+    generatedManifest,
+    handOwnedMetadata,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  assert.equal("homepage" in manifest, false);
+});
+
 // Without a `files` field npm packs everything not ignored, and
 // openapi-generator writes neither `files` nor a .npmignore - a publish then
 // ships .github/, .sdk-pipeline/, docs/ and any editor leftovers, permanently,
@@ -106,6 +158,7 @@ test("buildPackageManifest overwrites hand-owned fields with the maintained valu
 test("buildPackageManifest confines the npm tarball to the built output", () => {
   const manifest = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest,
     handOwnedMetadata,
     version: "1.3.0",
@@ -118,6 +171,7 @@ test("buildPackageManifest confines the npm tarball to the built output", () => 
 test("buildPackageManifest overrides a `files` field the generator put there", () => {
   const manifest = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest: { ...generatedManifest, files: ["dist", "src", ".sdk-pipeline", ".idea"] },
     handOwnedMetadata,
     version: "1.3.0",
@@ -132,6 +186,7 @@ test("buildPackageManifest overrides a `files` field the generator put there", (
 test("buildPackageManifest returns a fresh `files` array, not the shared constant", () => {
   const manifest = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest,
     handOwnedMetadata,
     version: "1.3.0",
@@ -146,6 +201,7 @@ test("buildPackageManifest returns a fresh `files` array, not the shared constan
 test("buildPackageManifest leaves generator-owned fields untouched", () => {
   const manifest = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest,
     handOwnedMetadata,
     version: "1.3.0",
@@ -167,6 +223,7 @@ test("buildPackageManifest rejects hand-owned metadata missing a required field"
       () =>
         buildPackageManifest({
           target: "ts",
+          packageName: "jsonhub-sdk",
           generatedManifest,
           handOwnedMetadata: incomplete,
           version: "1.3.0",
@@ -177,9 +234,30 @@ test("buildPackageManifest rejects hand-owned metadata missing a required field"
   }
 });
 
+test("buildPackageManifest rejects hand-owned metadata missing every optional field at once", () => {
+  const stripped = { ...handOwnedMetadata };
+  for (const field of OPTIONAL_HAND_OWNED_FIELDS) {
+    delete stripped[field];
+  }
+
+  const manifest = buildPackageManifest({
+    target: "ts",
+    packageName: "jsonhub-sdk",
+    generatedManifest,
+    handOwnedMetadata: stripped,
+    version: "1.3.0",
+    sourceApiVersion: "v0.9.3"
+  });
+
+  for (const field of OPTIONAL_HAND_OWNED_FIELDS) {
+    assert.equal(field in manifest, false);
+  }
+});
+
 test("buildPackageManifest is idempotent: regenerating twice with unchanged inputs is byte-identical", () => {
   const first = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest,
     handOwnedMetadata,
     version: "1.3.0",
@@ -190,6 +268,7 @@ test("buildPackageManifest is idempotent: regenerating twice with unchanged inpu
   // same placeholders) and re-reads the same hand-owned metadata file.
   const second = buildPackageManifest({
     target: "ts",
+    packageName: "jsonhub-sdk",
     generatedManifest: { ...generatedManifest },
     handOwnedMetadata,
     version: "1.3.0",
@@ -222,9 +301,39 @@ const generatedPoetryManifest = {
   }
 };
 
-test("buildPoetryManifest writes the pipeline-owned fields under [tool.poetry]", () => {
+test("buildPoetryManifest writes the given package name under [tool.poetry]", () => {
+  for (const packageName of ["jsonhub-sdk", "pay-subscriptions-sdk"]) {
+    const manifest = buildPoetryManifest({
+      target: "python",
+      packageName,
+      generatedManifest: generatedPoetryManifest,
+      handOwnedMetadata: poetryHandOwnedMetadata,
+      version: "1.3.0",
+      sourceApiVersion: "v0.9.3"
+    });
+
+    assert.equal(manifest.tool.poetry.name, packageName);
+  }
+});
+
+test("buildPoetryManifest rejects a missing package name", () => {
+  assert.throws(
+    () =>
+      buildPoetryManifest({
+        target: "python",
+        generatedManifest: generatedPoetryManifest,
+        handOwnedMetadata: poetryHandOwnedMetadata,
+        version: "1.3.0",
+        sourceApiVersion: "v0.9.3"
+      }),
+    /package name/
+  );
+});
+
+test("buildPoetryManifest writes the pipeline-owned fields", () => {
   const manifest = buildPoetryManifest({
     target: "python",
+    packageName: "jsonhub-sdk",
     generatedManifest: generatedPoetryManifest,
     handOwnedMetadata: poetryHandOwnedMetadata,
     version: "1.3.0",
@@ -243,6 +352,7 @@ test("buildPoetryManifest writes the pipeline-owned fields under [tool.poetry]",
 test("buildPoetryManifest keeps Source API Version out of [tool.poetry], which Poetry validates strictly", () => {
   const manifest = buildPoetryManifest({
     target: "python",
+    packageName: "jsonhub-sdk",
     generatedManifest: generatedPoetryManifest,
     handOwnedMetadata: poetryHandOwnedMetadata,
     version: "1.3.0",
@@ -260,6 +370,7 @@ test("buildPoetryManifest keeps Source API Version out of [tool.poetry], which P
 test("buildPoetryManifest adds no npm-style `files` field", () => {
   const manifest = buildPoetryManifest({
     target: "python",
+    packageName: "jsonhub-sdk",
     generatedManifest: generatedPoetryManifest,
     handOwnedMetadata: poetryHandOwnedMetadata,
     version: "1.3.0",
@@ -273,6 +384,7 @@ test("buildPoetryManifest adds no npm-style `files` field", () => {
 test("buildPoetryManifest overwrites hand-owned fields with the maintained values", () => {
   const manifest = buildPoetryManifest({
     target: "python",
+    packageName: "jsonhub-sdk",
     generatedManifest: generatedPoetryManifest,
     handOwnedMetadata: poetryHandOwnedMetadata,
     version: "1.3.0",
@@ -289,6 +401,7 @@ test("buildPoetryManifest overwrites hand-owned fields with the maintained value
 test("buildPoetryManifest leaves generator-owned fields untouched", () => {
   const manifest = buildPoetryManifest({
     target: "python",
+    packageName: "jsonhub-sdk",
     generatedManifest: generatedPoetryManifest,
     handOwnedMetadata: poetryHandOwnedMetadata,
     version: "1.3.0",
@@ -309,6 +422,7 @@ test("buildPoetryManifest rejects hand-owned metadata missing a required field",
       () =>
         buildPoetryManifest({
           target: "python",
+          packageName: "jsonhub-sdk",
           generatedManifest: generatedPoetryManifest,
           handOwnedMetadata: incomplete,
           version: "1.3.0",
@@ -324,6 +438,7 @@ test("buildPoetryManifest rejects a generated manifest with no [tool.poetry] tab
     () =>
       buildPoetryManifest({
         target: "python",
+        packageName: "jsonhub-sdk",
         generatedManifest: {},
         handOwnedMetadata: poetryHandOwnedMetadata,
         version: "1.3.0",

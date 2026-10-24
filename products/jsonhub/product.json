@@ -1,0 +1,8 @@
+{
+  "packageName": "jsonhub-sdk",
+  "apiContractUrl": "https://api.jsonhub.cloud/api/docs.jsonopenapi",
+  "targets": {
+    "ts": { "repository": "lbacik/jsonhub-sdk-ts" },
+    "python": { "repository": "lbacik/jsonhub-sdk-python" }
+  }
+}

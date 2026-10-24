@@ -10,8 +10,8 @@ set -euo pipefail
 # scripts/release-python.sh, after generate-and-decide.sh has written
 # $WORK_DIR/decision.json - a no-op when that verdict says not to release.
 #
-# Required environment variables: GENERATOR_DIR, TARGET_DIR, TARGET (ts |
-# python), WORK_DIR, SOURCE_API_VERSION.
+# Required environment variables: GENERATOR_DIR, TARGET_DIR, PRODUCT (e.g.
+# jsonhub), TARGET (ts | python), WORK_DIR, SOURCE_API_VERSION.
 #
 # Optional environment variables:
 #   TARGET_BRANCH         branch in TARGET_DIR to commit and push to (default: main)
@@ -20,6 +20,7 @@ set -euo pipefail
 
 : "${GENERATOR_DIR:?}"
 : "${TARGET_DIR:?}"
+: "${PRODUCT:?}"
 : "${TARGET:?}"
 : "${WORK_DIR:?}"
 : "${SOURCE_API_VERSION:?}"
@@ -31,22 +32,37 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-jsonhub-sdk-generator[bot]@users.noreply.githu
 # shellcheck source=lib.sh
 source "$GENERATOR_DIR/scripts/lib.sh"
 
-# See scripts/generate-and-decide.sh for what each target config means.
+# Everything Product-specific - the SDK repository, the package name, the
+# hand-owned metadata location - comes from src/product.mjs, so adding a
+# Product means adding a directory under products/, never touching this script.
 # TARGET_REPO_NAME is the SDK Target's GitHub repository name, used in the
 # release commit message and log line - TARGET_DIR itself is just a local
 # checkout path (e.g. "target"), not that name. It is deliberately not the
-# published package name (both targets publish as "jsonhub-sdk", see
-# src/package-metadata.mjs): a GitHub organisation is one flat namespace, so
-# the repositories - unlike the packages - need the language suffix.
+# published package name (each Product's targets publish under that Product's
+# one package name, see src/product.mjs): a GitHub organisation is one flat
+# namespace, so the repositories - unlike the packages - need the language
+# suffix. Only the short name (no organisation prefix) goes into the message,
+# matching what previous releases wrote.
+node "$GENERATOR_DIR/src/resolve-product.mjs" \
+  --products-dir "$GENERATOR_DIR/products" \
+  --product "$PRODUCT" \
+  --target "$TARGET" > "$WORK_DIR/resolution.json"
+TARGET_REPO_NAME="$(json_field "$WORK_DIR/resolution.json" repository)"
+TARGET_REPO_SHORT="${TARGET_REPO_NAME##*/}"
+PACKAGE_NAME="$(json_field "$WORK_DIR/resolution.json" packageName)"
+HAND_OWNED_METADATA="$GENERATOR_DIR/$(json_field "$WORK_DIR/resolution.json" handOwnedMetadata)"
+
+# The one place this script (and generate-and-decide.sh) branches per SDK
+# Target: the manifest file each ecosystem's generator writes, and how to read
+# that manifest's version field. Add a target here only once it is enabled in
+# a Product's product.json with hand-owned metadata to go with it.
 case "$TARGET" in
   ts)
     MANIFEST_FILE="package.json"
-    TARGET_REPO_NAME="jsonhub-sdk-ts"
     read_version() { json_field "$1" version; }
     ;;
   python)
     MANIFEST_FILE="pyproject.toml"
-    TARGET_REPO_NAME="jsonhub-sdk-python"
     read_version() { toml_field "$1" tool.poetry.version; }
     ;;
   *)
@@ -69,8 +85,9 @@ PREVIOUS_VERSION="$(cat "$WORK_DIR/previous-version")"
 echo "== Writing package metadata and the changelog =="
 node "$GENERATOR_DIR/src/write-package-metadata.mjs" \
   --target "$TARGET" \
+  --package-name "$PACKAGE_NAME" \
   --manifest "$CURRENT_SURFACE/$MANIFEST_FILE" \
-  --hand-owned-metadata "$GENERATOR_DIR/manifests/$TARGET/package.metadata.json" \
+  --hand-owned-metadata "$HAND_OWNED_METADATA" \
   --changelog "$CURRENT_SURFACE/CHANGELOG.md" \
   --source-api-version "$SOURCE_API_VERSION" \
   --previous-version "$PREVIOUS_VERSION" \
@@ -83,7 +100,7 @@ mkdir -p "$CURRENT_SURFACE/.sdk-pipeline"
 cp "$WORK_DIR/canonical-client-spec.json" "$CURRENT_SURFACE/.sdk-pipeline/canonical-client-spec.json"
 cp "$WORK_DIR/current-toolchain-version" "$CURRENT_SURFACE/.sdk-pipeline/toolchain-version"
 
-echo "== Committing and tagging $TARGET_REPO_NAME v$VERSION =="
+echo "== Committing and tagging $TARGET_REPO_SHORT v$VERSION =="
 # .github and any lockfile a human ran (package-lock.json, poetry.lock) are
 # excluded from the wipe alongside .git: .github holds the hand-maintained
 # registry-publish workflow (see README's "Publishing the TypeScript SDK
@@ -103,7 +120,7 @@ cp -a "$CURRENT_SURFACE/." "$TARGET_DIR/"
   git config user.name "$GIT_USER_NAME"
   git config user.email "$GIT_USER_EMAIL"
   git add -A
-  git commit -m "Release $TARGET_REPO_NAME v$VERSION (source API $SOURCE_API_VERSION)"
+  git commit -m "Release $TARGET_REPO_SHORT v$VERSION (source API $SOURCE_API_VERSION)"
   git tag "v$VERSION"
 
   if [ "${SKIP_PUSH:-0}" != "1" ]; then
@@ -112,4 +129,4 @@ cp -a "$CURRENT_SURFACE/." "$TARGET_DIR/"
   fi
 )
 
-echo "Released $TARGET_REPO_NAME v$VERSION from source API $SOURCE_API_VERSION."
+echo "Released $TARGET_REPO_SHORT v$VERSION from source API $SOURCE_API_VERSION."

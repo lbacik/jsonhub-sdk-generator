@@ -37,7 +37,7 @@ on:
           Release even though the API Contract and the generated SDK Surface
           are unchanged. For rolling out a generator-side change the three
           detectors cannot see - the package name, the npm tarball's file
-          allowlist, the hand-owned metadata in manifests/ - which would
+          allowlist, the hand-owned metadata in products/ - which would
           otherwise sit unreleased until some future API Release happened to
           carry it along. It does not pick the bump level: with no structural
           API change, a forced run is a patch.
@@ -127,6 +127,7 @@ jobs:
         env:
           GENERATOR_DIR: ${{ github.workspace }}/generator
           TARGET_DIR: ${{ github.workspace }}/target
+          PRODUCT: jsonhub
           API_URL: >-
             ${{ (github.event_name == 'workflow_dispatch' && inputs.api_url)
              || (github.event_name == 'repository_dispatch' && github.event.client_payload.api_url)

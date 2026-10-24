@@ -37,6 +37,42 @@ The check also runs under `--skip-generation`, so the cheap "did the API Contrac
 path fails fast too. YAML contracts are never parsed, so they skip this check the same way they
 skip the reduction.
 
+## Products
+
+Each API this pipeline releases SDKs for is a **Product** (see `CONTEXT.md`): one package
+name, the SDK Targets it enables, one repository per SDK Target. A Product lives in
+`products/<product>/` as a `product.json` plus one
+`products/<product>/<target>/package.metadata.json` per enabled SDK Target:
+
+```json
+{
+  "packageName": "jsonhub-sdk",
+  "apiContractUrl": "https://api.jsonhub.cloud/api/docs.jsonopenapi",
+  "targets": {
+    "ts": { "repository": "lbacik/jsonhub-sdk-ts" },
+    "python": { "repository": "lbacik/jsonhub-sdk-python" }
+  }
+}
+```
+
+An SDK Target is enabled exactly when its key is present in `targets`. Adding a Product means
+adding such a directory — no script or workflow changes. `src/product.mjs` is the only code
+that interprets `products/`; `src/resolve-product.mjs` is its thin CLI wrapper, the same
+shape as `decide-release` / `write-package-metadata`:
+
+```bash
+node ./src/resolve-product.mjs --product jsonhub --target ts
+```
+
+It prints whether the SDK Target is enabled, its SDK repository, package name, resolved API
+Contract URL (a manual `api_url` first, then the dispatch payload's `api_url`, then the
+Product's `apiContractUrl`), token secret name, and hand-owned metadata location.
+
+JsonHub is the first Product. Its `apiContractUrl` mirrors the `JSONHUB_API_URL` repository
+variable the release workflows fall back to — see "Triggering the pipeline from an API
+Release". Dispatching on Product (one workflow run per Product) is a later ticket; the
+workflows pass `PRODUCT=jsonhub` for now.
+
 ## Installation
 
 ```bash
@@ -361,7 +397,7 @@ API's.
 All three detectors watch the API Contract, the generated SDK Surface, and the toolchain pin —
 and nothing else. The pipeline-owned package metadata (`src/package-metadata.mjs`: the package
 name, the npm tarball's `files` allowlist) and the hand-owned metadata in
-`manifests/<target>/` are applied afterwards, by `src/write-package-metadata.mjs`, and only
+`products/<product>/<target>/` are applied afterwards, by `src/write-package-metadata.mjs`, and only
 once the verdict already says to release. A change confined to those is therefore invisible
 here: it cannot trigger a release of its own, and sits unreleased until some future API Release
 happens to carry it along.
@@ -400,16 +436,19 @@ Package manifest fields are split in two:
 
 - **pipeline-owned** — package name, version, Source API Version, and (npm only) `files`. Written
   every run, regardless of what `openapi-generator` put there.
-- **hand-owned** — author, licence, repository, and keywords. Read from
-  `manifests/<target>/package.metadata.json` (tracked in this repository, outside `generated/`,
-  so `openapi-generator` never touches it) and written back untouched, replacing whatever
-  placeholder `openapi-generator` emitted.
+- **hand-owned** — author, licence, repository, and keywords, plus (npm only) an optional
+  `homepage`. Read from `products/<product>/<target>/package.metadata.json` (tracked in this
+  repository, outside `generated/`, so `openapi-generator` never touches it) and written back
+  untouched, replacing whatever placeholder `openapi-generator` emitted. `homepage` is written
+  when the Product provides it and omitted otherwise; the other four stay required and fail
+  loudly when missing.
 
 ```bash
 npm run write-package-metadata -- \
   --target ts \
+  --package-name jsonhub-sdk \
   --manifest generated/ts/package.json \
-  --hand-owned-metadata manifests/ts/package.metadata.json \
+  --hand-owned-metadata products/jsonhub/ts/package.metadata.json \
   --changelog generated/ts/CHANGELOG.md \
   --source-api-version v0.9.3 \
   --previous-version 1.2.0 \
@@ -417,14 +456,15 @@ npm run write-package-metadata -- \
 ```
 
 `--previous-version`/`--bump` (typically `decide-release`'s verdict) derive the next version;
-pass `--version` directly instead if the version is already known. Every SDK Target publishes
-under the same package name, `jsonhub-sdk` — `jsonhub-sdk` on npm, `jsonhub-sdk` on PyPI — so the
-SDK Targets stay a recognisable family across registries. The language suffix belongs to the
-*repository* name (`jsonhub-sdk-ts`, `jsonhub-sdk-python`) and not to the package name: a GitHub
-organisation is one flat, language-agnostic namespace and needs the suffix to tell the
-repositories apart, whereas a registry is already the namespace for its own language, so `-ts` on
-npm or `-python` on PyPI would only repeat what the registry already says. This matches how the
-SDKs of Stripe, OpenAI, Twilio and others are named.
+pass `--version` directly instead if the version is already known. `--package-name` is the
+Product's one package name (JsonHub's is `jsonhub-sdk`, resolved via `src/resolve-product.mjs`):
+every SDK Target of one Product publishes under that same name — `jsonhub-sdk` on npm,
+`jsonhub-sdk` on PyPI — so the SDK Targets stay a recognisable family across registries. The
+language suffix belongs to the *repository* name (`jsonhub-sdk-ts`, `jsonhub-sdk-python`) and
+not to the package name: a GitHub organisation is one flat, language-agnostic namespace and
+needs the suffix to tell the repositories apart, whereas a registry is already the namespace for
+its own language, so `-ts` on npm or `-python` on PyPI would only repeat what the registry
+already says. This matches how the SDKs of Stripe, OpenAI, Twilio and others are named.
 
 For `python` that also fixes the import site: the PyPI distribution `jsonhub-sdk` installs the
 `jsonhub_sdk` module, so users write `import jsonhub_sdk` rather than `import jsonhub_sdk_python`.
@@ -455,18 +495,17 @@ the file if it doesn't exist yet), between `<!-- compatibility-table:start -->` 
 left alone. Regenerating with the same SDK Release version replaces that row instead of
 duplicating it.
 
-The unified package name and the pipeline/hand-owned split are implemented in
-`src/package-metadata.mjs` (`buildPackageManifest` for npm-style manifests, `buildPoetryManifest`
-for Poetry-style ones), and the compatibility table in `src/changelog.mjs` — both are pure
-functions, tested independently of file I/O; `src/write-package-metadata.mjs` is the thin CLI
-wrapper that reads and writes the actual files, picking the manifest format and builder function
-from `--manifest`'s extension.
+The pipeline/hand-owned split is implemented in `src/package-metadata.mjs`
+(`buildPackageManifest` for npm-style manifests, `buildPoetryManifest` for Poetry-style ones;
+both take the package name as input), and the compatibility table in `src/changelog.mjs` —
+both are pure functions, tested independently of file I/O; `src/write-package-metadata.mjs` is
+the thin CLI wrapper that reads and writes the actual files, picking the manifest format and
+builder function from `--manifest`'s extension.
 
 This covers the `ts` and `python` targets: `src/cli.mjs` can generate `js`/`php` output too, but
-`PACKAGE_NAME_BY_TARGET` in `src/package-metadata.mjs` and `manifests/<target>/package.metadata.json`
-exist only for `ts` and `python`, since those are the only SDK Targets this repository holds
-hand-owned metadata for today. Adding a target here means adding its entry to
-`PACKAGE_NAME_BY_TARGET` and a matching `manifests/<target>/package.metadata.json` — `php` stays
+only `ts` and `python` are enabled in a Product's `product.json` with hand-owned metadata at
+`products/<product>/<target>/package.metadata.json` to go with it. Enabling a target here means
+adding its key to the Product's `targets` and a matching hand-owned metadata file — `php` stays
 excluded, since it isn't an SDK Target (see `CONTEXT.md`).
 
 ## Triggering the pipeline from an API Release
@@ -532,6 +571,7 @@ steps run in `scripts/release-ts.sh`, which you can also run locally:
 ```bash
 GENERATOR_DIR=$(pwd) \
 TARGET_DIR=/path/to/a/checkout/of/jsonhub-sdk-ts \
+PRODUCT=jsonhub \
 API_URL=https://example.com/openapi.json \
 SOURCE_API_VERSION=v0.9.3 \
   ./scripts/release-ts.sh
@@ -662,7 +702,8 @@ above — the two SDK Targets differ only in their generator and their registry 
 section for how `generate-and-decide.sh`/`publish-to-target.sh` split the work; both scripts are
 shared between `release-ts.sh` and `release-python.sh`, branching only on the manifest file
 (`package.json` vs `pyproject.toml`) and how to read a version out of it. The package name passed
-to the generator is not one of those branches: both targets pass `jsonhub-sdk`, and `src/cli.mjs`
+to the generator is not one of those branches: both targets pass the Product's package name
+(JsonHub's is `jsonhub-sdk`, resolved via `src/resolve-product.mjs`), and `src/cli.mjs`
 underscores it for `python`.
 
 The workflow itself checks out the two repositories, installs the Node dependencies this CLI needs
@@ -672,6 +713,7 @@ the pipeline steps run in `scripts/release-python.sh`, which you can also run lo
 ```bash
 GENERATOR_DIR=$(pwd) \
 TARGET_DIR=/path/to/a/checkout/of/jsonhub-sdk-python \
+PRODUCT=jsonhub \
 API_URL=https://example.com/openapi.json \
 SOURCE_API_VERSION=v0.9.3 \
   ./scripts/release-python.sh
