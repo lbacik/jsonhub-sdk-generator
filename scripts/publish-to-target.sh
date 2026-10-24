@@ -79,9 +79,9 @@ node "$GENERATOR_DIR/src/write-package-metadata.mjs" \
 VERSION="$(read_version "$CURRENT_SURFACE/$MANIFEST_FILE")"
 
 echo "== Retaining the Canonical Client Spec and toolchain version for the next run =="
-mkdir -p "$CURRENT_SURFACE/.jsonhub"
-cp "$WORK_DIR/canonical-client-spec.json" "$CURRENT_SURFACE/.jsonhub/canonical-client-spec.json"
-cp "$WORK_DIR/current-toolchain-version" "$CURRENT_SURFACE/.jsonhub/toolchain-version"
+mkdir -p "$CURRENT_SURFACE/.sdk-pipeline"
+cp "$WORK_DIR/canonical-client-spec.json" "$CURRENT_SURFACE/.sdk-pipeline/canonical-client-spec.json"
+cp "$WORK_DIR/current-toolchain-version" "$CURRENT_SURFACE/.sdk-pipeline/toolchain-version"
 
 echo "== Committing and tagging $TARGET_REPO_NAME v$VERSION =="
 # .github and any lockfile a human ran (package-lock.json, poetry.lock) are
