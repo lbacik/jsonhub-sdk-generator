@@ -1,27 +1,38 @@
 name: Release TypeScript SDK
 
-# The end-to-end pipeline run for the ts SDK Target: fetch the live API
-# Contract, reduce it to a Canonical Client Spec, generate the SDK Surface,
-# decide whether and how much to release, write package metadata, then commit
-# and tag into the jsonhub-sdk-ts repository. Nothing is published to npm
-# here - see CONTEXT.md and the parent design (issue #1) for the full pipeline.
+# The end-to-end pipeline run for the ts SDK Target of one Product: fetch the
+# live API Contract, reduce it to a Canonical Client Spec, generate the SDK
+# Surface, decide whether and how much to release, write package metadata, then
+# commit and tag into the Product's ts SDK repository (resolved from
+# products/<product>/product.json). Nothing is published to npm here - see
+# CONTEXT.md and the parent design (issue #1) for the full pipeline.
 #
 # Two ways in:
-#   - workflow_dispatch, triggered by hand, for regenerating on demand;
-#   - repository_dispatch (event_type "api-release"), sent by the API
-#     repository after a successful deploy. That call is fire-and-forget by
-#     construction: the dispatches endpoint returns as soon as the event is
-#     accepted, before this workflow even starts, so nothing that happens in
-#     this run can block or fail the API's own deploy. See the "Triggering
-#     the pipeline from an API Release" section of README.md for the payload
-#     shape and the credential the API repository needs to send it.
+#   - workflow_dispatch, triggered by hand, for regenerating on demand - the
+#     `product` input names the Product, exactly as client_payload.product does
+#     below;
+#   - repository_dispatch (event_type "api-release"), sent by a Product's API
+#     repository after a successful deploy. One api-release notification fires
+#     both this workflow and release-python.yml independently, and each workflow
+#     releases only its own SDK Target of the named Product: a Product that
+#     does not enable this SDK Target ends green here, releasing nothing. That
+#     call is fire-and-forget by construction: the dispatches endpoint returns
+#     as soon as the event is accepted, before this workflow even starts, so
+#     nothing that happens in this run can block or fail the API's own deploy.
+#     See the "Triggering the pipeline from an API Release" section of
+#     README.md for the payload shape and the credential the API repository
+#     needs to send it.
 on:
   workflow_dispatch:
     inputs:
+      product:
+        description: 'Product whose SDKs this run releases, e.g. jsonhub'
+        required: true
+        type: string
       api_url:
         description: >-
           URL of the live API Contract (OpenAPI JSON). Leave empty to use the
-          JSONHUB_API_URL repository variable.
+          Product's apiContractUrl.
         required: false
         type: string
       source_api_version:
@@ -43,16 +54,18 @@ on:
   repository_dispatch:
     types: [api-release]
 
-# Never run two releases of the same SDK Target at once - both would read the
-# same "previous" state in jsonhub-sdk-ts and race to push.
+# One Product's releases never queue behind another's; two runs for the same
+# Product x SDK Target still serialize - both would read the same "previous"
+# state in the SDK repository and race to push.
 concurrency:
-  group: release-ts
+  group: release-${{ inputs.product || github.event.client_payload.product }}-ts
   cancel-in-progress: false
 
 # issues:write and actions:read are for the failure-reporting steps at the end
 # of the job (see README's "Reporting pipeline failures"); contents:read is
-# all checking out this repository itself needs - the push to jsonhub-sdk-ts
-# goes through JSONHUB_SDK_TS_TOKEN, not this token.
+# all checking out this repository itself needs - the push to the Product's SDK
+# repository goes through that Product's <PRODUCT>_SDK_TS_TOKEN secret, not
+# this token.
 permissions:
   contents: read
   issues: write
@@ -62,38 +75,97 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out jh-client-generator
+      - name: Check out jsonhub-sdk-generator
         uses: actions/checkout@v4
         with:
           path: generator
-
-      - name: Check out jsonhub-sdk-ts
-        uses: actions/checkout@v4
-        with:
-          repository: lbacik/jsonhub-sdk-ts
-          token: ${{ secrets.JSONHUB_SDK_TS_TOKEN }}
-          path: target
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
+      - name: Install generator dependencies
+        working-directory: generator
+        run: npm ci
+
+      # Everything Product-specific - the SDK repository, the token secret
+      # name, the API Contract URL - comes from Product resolution
+      # (src/resolve-product.mjs over products/<product>/product.json), so
+      # adding a Product means adding a directory, never touching this
+      # workflow. repository_dispatch carries its inputs in client_payload
+      # rather than inputs, and product is the one input this workflow cannot
+      # default: without it nothing says whose SDKs to release. A Product that
+      # does not enable this SDK Target fails a manual run outright, but ends
+      # a repository_dispatch run green - releasing nothing - so one
+      # api-release dispatch can fan out to every SDK Target workflow without
+      # each Product enabling all of them.
+      - name: Resolve Product
+        id: resolve
+        working-directory: generator
+        env:
+          PRODUCT_INPUT: ${{ inputs.product || github.event.client_payload.product }}
+          MANUAL_API_URL: ${{ inputs.api_url }}
+          DISPATCH_API_URL: ${{ github.event.client_payload.api_url }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          TARGET="ts"
+          PRODUCT_VALUE="${PRODUCT_INPUT:-}"
+          if [ -z "$PRODUCT_VALUE" ]; then
+            if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+              echo "::error::repository_dispatch payload is missing client_payload.product"
+            else
+              echo "::error::workflow_dispatch run is missing the required product input"
+            fi
+            exit 1
+          fi
+          ARGS=(--product "$PRODUCT_VALUE" --target "$TARGET")
+          if [ -n "${MANUAL_API_URL:-}" ]; then
+            ARGS+=(--manual-api-url "$MANUAL_API_URL")
+          fi
+          if [ -n "${DISPATCH_API_URL:-}" ]; then
+            ARGS+=(--dispatch-api-url "$DISPATCH_API_URL")
+          fi
+          node ./src/resolve-product.mjs "${ARGS[@]}" > "$RUNNER_TEMP/resolution.json"
+          ENABLED="$(node -p "require('$RUNNER_TEMP/resolution.json').enabled ? 'true' : 'false'")"
+          {
+            echo "product=$PRODUCT_VALUE"
+            echo "enabled=$ENABLED"
+            echo "repository=$(node -p "require('$RUNNER_TEMP/resolution.json').repository ?? ''")"
+            echo "token_secret=$(node -p "require('$RUNNER_TEMP/resolution.json').tokenSecret ?? ''")"
+            echo "api_contract_url=$(node -p "require('$RUNNER_TEMP/resolution.json').apiContractUrl ?? ''")"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$ENABLED" != "true" ]; then
+            if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+              echo "::notice::Product \"$PRODUCT_VALUE\" does not enable the \"$TARGET\" SDK Target - nothing to release."
+              exit 0
+            else
+              echo "::error::Product \"$PRODUCT_VALUE\" does not enable the \"$TARGET\" SDK Target."
+              exit 1
+            fi
+          fi
+
+      - name: Check out SDK repository
+        if: steps.resolve.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.resolve.outputs.repository }}
+          token: ${{ secrets[steps.resolve.outputs.token_secret] }}
+          path: target
+
       # openapi-generator-cli wraps a Java-based generator.
       - uses: actions/setup-java@v4
+        if: steps.resolve.outputs.enabled == 'true'
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Install dependencies
-        working-directory: generator
-        run: npm ci
 
       # repository_dispatch carries its inputs in client_payload rather than
       # inputs, and source_api_version is the one input this workflow cannot
       # default: without it the release commit and tag would carry the wrong
       # Source API Version, silently.
       - name: Require a Source API Version
-        if: github.event_name == 'repository_dispatch' && !github.event.client_payload.source_api_version
+        if: steps.resolve.outputs.enabled == 'true' && github.event_name == 'repository_dispatch' && !github.event.client_payload.source_api_version
         run: |
           echo "::error::repository_dispatch payload is missing client_payload.source_api_version"
           exit 1
@@ -108,17 +180,15 @@ jobs:
       #   2. a generated SDK Surface comparison, deciding *whether* to release;
       #   3. a structured Canonical Client Spec comparison, deciding *how
       #      much* to bump.
-      # An unchanged API Contract leaves jsonhub-sdk-ts untouched: no commit,
-      # no tag, no push.
+      # An unchanged API Contract leaves the Product's SDK repository
+      # untouched: no commit, no tag, no push.
       - name: Run the release pipeline
+        if: steps.resolve.outputs.enabled == 'true'
         env:
           GENERATOR_DIR: ${{ github.workspace }}/generator
           TARGET_DIR: ${{ github.workspace }}/target
-          PRODUCT: jsonhub
-          API_URL: >-
-            ${{ (github.event_name == 'workflow_dispatch' && inputs.api_url)
-             || (github.event_name == 'repository_dispatch' && github.event.client_payload.api_url)
-             || vars.JSONHUB_API_URL }}
+          PRODUCT: ${{ steps.resolve.outputs.product }}
+          API_URL: ${{ steps.resolve.outputs.api_contract_url }}
           SOURCE_API_VERSION: >-
             ${{ (github.event_name == 'workflow_dispatch' && inputs.source_api_version)
              || (github.event_name == 'repository_dispatch' && github.event.client_payload.source_api_version) }}
@@ -134,16 +204,18 @@ jobs:
       # Repeated failures update the one open issue instead of piling up a
       # new one per run; a run that later succeeds closes it again. See
       # README's "Reporting pipeline failures" for the full behaviour. A run
-      # that legitimately releases nothing (e.g. an unchanged API Contract)
-      # is not a failure - it exits 0 above and never reaches this step.
+      # that legitimately releases nothing (e.g. an unchanged API Contract,
+      # or a Product that does not enable this SDK Target) exits 0 above and
+      # never reaches this step.
       - name: Report a pipeline failure
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
             const target = 'ts'
+            const product = context.payload.inputs?.product || context.payload.client_payload?.product || 'unknown'
             const label = 'pipeline-failure'
-            const title = `Release pipeline failure: ${target} SDK Target`
+            const title = `Release pipeline failure: ${product} ${target} SDK Target`
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
 
             const { data: runJobs } = await github.rest.actions.listJobsForWorkflowRun({
@@ -187,13 +259,14 @@ jobs:
             }
 
       - name: Resolve an open pipeline-failure issue
-        if: success()
+        if: success() && steps.resolve.outputs.enabled == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const target = 'ts'
+            const product = context.payload.inputs?.product || context.payload.client_payload?.product || 'unknown'
             const label = 'pipeline-failure'
-            const title = `Release pipeline failure: ${target} SDK Target`
+            const title = `Release pipeline failure: ${product} ${target} SDK Target`
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
 
             const { data: openIssues } = await github.rest.issues.listForRepo({

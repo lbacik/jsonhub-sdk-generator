@@ -68,10 +68,10 @@ It prints whether the SDK Target is enabled, its SDK repository, package name, r
 Contract URL (a manual `api_url` first, then the dispatch payload's `api_url`, then the
 Product's `apiContractUrl`), token secret name, and hand-owned metadata location.
 
-JsonHub is the first Product. Its `apiContractUrl` mirrors the `JSONHUB_API_URL` repository
-variable the release workflows fall back to — see "Triggering the pipeline from an API
-Release". Dispatching on Product (one workflow run per Product) is a later ticket; the
-workflows pass `PRODUCT=jsonhub` for now.
+The release workflows dispatch on Product: `client_payload.product` on an `api-release`
+dispatch — or the `product` input on a manual run — names the Product whose SDKs the run
+releases, and Product resolution (`src/resolve-product.mjs`) supplies the SDK repository,
+token secret and API Contract URL. JsonHub is the first Product.
 
 ## Installation
 
@@ -536,23 +536,33 @@ excluded, since it isn't an SDK Target (see `CONTEXT.md`).
 
 ## Triggering the pipeline from an API Release
 
-The JsonHub API repository notifies this one after a successful deploy, so tagging an API
+Each Product's API repository notifies this one after a successful deploy, so tagging an API
 Release is the only action its maintainer takes — the SDK pipeline runs on its own from there.
-It sends a [`repository_dispatch`](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#repository_dispatch)
+(JsonHub's API repository was the first; every Product follows the same shape.) It sends a
+[`repository_dispatch`](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#repository_dispatch)
 event of type `api-release`:
 
 ```bash
 curl -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "Authorization: Bearer $JH_CLIENT_GENERATOR_DISPATCH_TOKEN" \
-  https://api.github.com/repos/lbacik/jh-client-generator/dispatches \
-  -d '{"event_type":"api-release","client_payload":{"source_api_version":"v0.9.4"}}'
+  https://api.github.com/repos/lbacik/jsonhub-sdk-generator/dispatches \
+  -d '{"event_type":"api-release","client_payload":{"product":"jsonhub","source_api_version":"v0.9.4"}}'
 ```
 
-`client_payload.source_api_version` is required — it becomes the SDK Release's recorded Source
-API Version, the same input `workflow_dispatch`'s `source_api_version` provides for a manual run.
-`client_payload.api_url` is optional, same as the manual trigger's `api_url` input: omit it to use
-the `JSONHUB_API_URL` repository variable.
+Use the canonical repository name `lbacik/jsonhub-sdk-generator` exactly as above: the old
+`jh-client-generator` name redirects in a browser, but that redirect is not followed by `gh
+api`/`curl` on POST, so dispatching at the old name fails.
+
+`client_payload.product` is required — it names the Product whose SDKs this dispatch releases,
+and the workflows resolve everything else (SDK repository, token secret, API Contract URL)
+from `products/<product>/product.json`. A dispatch without it fails loudly at the Resolve
+Product step and opens a failure issue titled with `unknown` (see "Reporting pipeline
+failures"). `client_payload.source_api_version` is required too — it becomes the SDK Release's
+recorded Source API Version, the same input `workflow_dispatch`'s `source_api_version` provides
+for a manual run. `client_payload.api_url` is optional, same as the manual trigger's `api_url`
+input: omit it to use the Product's `apiContractUrl`. The precedence is manual `api_url` first,
+then `client_payload.api_url`, then the Product's `apiContractUrl`.
 
 This is **fire-and-forget by construction**, not by convention: the `dispatches` endpoint accepts
 the event and returns before `release-ts.yml` even starts, so nothing that happens in this
@@ -565,21 +575,31 @@ Sending the event needs a credential held in the **API repository**, scoped to d
 this one — provisioning it is operational setup, not code, and is a prerequisite for this trigger
 to do anything:
 
-1. Create a fine-grained personal access token scoped only to the `jh-client-generator`
+1. Create a fine-grained personal access token scoped only to the `jsonhub-sdk-generator`
    repository, with repository permission **Contents: Read and write** — the minimum GitHub
-   requires for the `dispatches` endpoint, and it grants nothing else (no push access, no access
-   to any other repository).
+   requires for the `dispatches` endpoint. Stated honestly: that permission does allow pushing
+   to this repository, not just dispatching — accepted knowingly, since a single owner holds
+   both sides and there is nothing else to scope it down to.
 2. Store it as a secret in the **API repository** (not here) — for example
    `JH_CLIENT_GENERATOR_DISPATCH_TOKEN` — and send it as the `Authorization: Bearer` header above
    from the API repository's own deploy workflow.
 
-Manual triggering (`workflow_dispatch`) keeps working exactly as before, for regenerating without
-waiting on an API Release.
+Manual triggering (`workflow_dispatch`) keeps working as before, for regenerating without
+waiting on an API Release — passing `product` explicitly, since a manual run has no
+`client_payload` to take it from.
 
 Both the `ts` and `python` SDK Targets react to this event: `release-ts.yml` and
 `release-python.yml` each declare their own `repository_dispatch` trigger, so one API Release
 notification fires both workflows independently — one SDK Target's run never blocks or depends on
-the other's.
+the other's. Each workflow releases only its own SDK Target of the named Product: a Product
+that does not enable the workflow's SDK Target ends that run green, releasing nothing and
+opening no failure issue — while a manual run for a disabled SDK Target (or an unknown
+Product) fails.
+
+The rollout order is: JsonHub sends `product` → this merges → `paysubscriptions-sdk-ts`
+and its token exist → PaySubscriptions adds its dispatch token. And once a JsonHub run has
+succeeded through `apiContractUrl`, delete the `JSONHUB_API_URL` repository variable —
+nothing reads it any more.
 
 ## Releasing the TypeScript SDK Target
 
@@ -638,18 +658,21 @@ module (see `AGENTS.md`):
 
 Two prerequisites are operational, not code, and gate every real run:
 
-- a `JSONHUB_SDK_TS_TOKEN` repository secret: a PAT with push access to `jsonhub-sdk-ts`, used to
-  check it out and to push the release commit and tag;
-- a live API Contract URL, passed as the `api_url` workflow input or set once as the
-  `JSONHUB_API_URL` repository variable.
+- a `<PRODUCT>_SDK_TS_TOKEN` repository secret (JsonHub's is `JSONHUB_SDK_TS_TOKEN`): a PAT
+  with push access to the Product's `ts` SDK repository, used to check it out and to push the
+  release commit and tag;
+- a live API Contract URL, passed as the `api_url` workflow input or — by default — the
+  Product's `apiContractUrl` from `products/<product>/product.json`.
 
 ## Reporting pipeline failures
 
 Both `release-ts.yml` and `release-python.yml` run unattended, so a break must surface somewhere a
 human will actually look rather than only in workflow-run history. Two `if: failure()` /
 `if: success()` steps at the end of each job handle this against a single label,
-`pipeline-failure`, and a per-target issue title (`Release pipeline failure: ts SDK Target` /
-`Release pipeline failure: python SDK Target`):
+`pipeline-failure`, and a per-Product-per-target issue title (`Release pipeline failure:
+<product> <target> SDK Target` — e.g. `Release pipeline failure: jsonhub ts SDK Target`;
+a run whose resolution fails before the Product is known files under the literal `unknown`,
+e.g. `Release pipeline failure: unknown ts SDK Target`):
 
 - **On failure**, they look up the current run's jobs via the Actions API to name the step that
   failed, then either open a new issue with that detail and the failed run's link, or — if an
@@ -660,10 +683,11 @@ human will actually look rather than only in workflow-run history. Two `if: fail
   closing comment linking the passing run and is closed.
 
 A run that legitimately releases nothing — an API Contract whose Canonical Client Spec digest is
-unchanged — exits `0` from `scripts/release-ts.sh`/`scripts/release-python.sh` and is a normal
-success, not a failure, so it never opens an issue and closes one left open by an earlier break.
-The two SDK Targets keep separate issues (one per title), so a break in one never masks or closes
-out a break in the other.
+unchanged, or a Product that does not enable the workflow's SDK Target — exits `0` and is a
+normal success, not a failure, so it never opens an issue and closes one left open by an earlier
+break (a skipped run for a disabled SDK Target neither opens nor closes anything — only a run
+that actually released closes its issue). Each Product × SDK Target keeps its own issue (one
+per title), so a break in one never masks or closes out a break in another Product or target.
 
 ## Publishing the TypeScript SDK Release to npm
 
@@ -752,11 +776,12 @@ to roll a change out, and the `force` input for the same thing from the workflow
 
 Two prerequisites are operational, not code, and gate every real run — the same shape as `ts`'s:
 
-- a `JSONHUB_SDK_PYTHON_TOKEN` repository secret: a PAT with push access to `jsonhub-sdk-python`,
-  used to check it out and to push the release commit and tag;
-- a live API Contract URL, passed as the `api_url` workflow input or set once as the
-  `JSONHUB_API_URL` repository variable (shared with the `ts` workflow — both SDK Targets are
-  generated from the same API Contract).
+- a `<PRODUCT>_SDK_PYTHON_TOKEN` repository secret (JsonHub's is `JSONHUB_SDK_PYTHON_TOKEN`):
+  a PAT with push access to the Product's `python` SDK repository, used to check it out and to
+  push the release commit and tag;
+- a live API Contract URL, passed as the `api_url` workflow input or — by default — the
+  Product's `apiContractUrl` from `products/<product>/product.json` (shared with the `ts`
+  workflow — both SDK Targets are generated from the same API Contract).
 
 ## Publishing the Python SDK Release to PyPI
 
