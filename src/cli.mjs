@@ -15,34 +15,40 @@ const rootDir = resolve(__dirname, "..");
 const OPENAPI_GENERATOR_RUNNER = "openapi-generator";
 const OPENAPI_PYTHON_CLIENT_RUNNER = "openapi-python-client";
 
+const SUPPORTED_OPENAPI_VERSIONS = ["3.0", "3.1"];
+
 const TARGETS = {
   ts: {
     runner: OPENAPI_GENERATOR_RUNNER,
     generator: "typescript-fetch",
     extension: "json",
     packageVersion: "1.0.0",
-    supportsNpmName: true
+    supportsNpmName: true,
+    supportedOpenApiVersions: [...SUPPORTED_OPENAPI_VERSIONS]
   },
   js: {
     runner: OPENAPI_GENERATOR_RUNNER,
     generator: "javascript",
     extension: "json",
     packageVersion: "1.0.0",
-    supportsNpmName: true
+    supportsNpmName: true,
+    supportedOpenApiVersions: [...SUPPORTED_OPENAPI_VERSIONS]
   },
   python: {
     // Its own generator, per this repository's per-SDK-Target toolchain
     // policy - see AGENTS.md and python-adapter/.
     runner: OPENAPI_PYTHON_CLIENT_RUNNER,
     extension: "json",
-    packageVersion: "0.1.0"
+    packageVersion: "0.1.0",
+    supportedOpenApiVersions: [...SUPPORTED_OPENAPI_VERSIONS]
   },
   php: {
     runner: OPENAPI_GENERATOR_RUNNER,
     generator: "php",
     extension: "json",
     packageVersion: "1.0.0",
-    supportsComposerName: true
+    supportsComposerName: true,
+    supportedOpenApiVersions: [...SUPPORTED_OPENAPI_VERSIONS]
   }
 };
 
@@ -154,6 +160,40 @@ function validateOptionsForTarget(options, targetConfig) {
   if (options.skipValidateSpec) {
     throw new Error("--skip-validate-spec is not supported for the python target.");
   }
+}
+
+// Every SDK Target's toolchain reads OpenAPI 3.0 and 3.1 only. A contract
+// served in any other version would fail deep inside the generator (125
+// Swagger-2.0-style validation errors or a NullPointerException), so the CLI
+// rejects it here instead, right after fetching and before the Canonical
+// Client Spec is written, with one actionable line. YAML contracts skip this
+// check the same way they skip the reduction: they are never parsed.
+function openApiMajorMinor(version) {
+  const match = String(version ?? "").trim().match(/^(\d+)\.(\d+)/);
+
+  if (!match) {
+    return null;
+  }
+
+  return `${match[1]}.${match[2]}`;
+}
+
+function validateOpenApiVersionForTarget(document, targetConfig) {
+  const version = document?.openapi ?? document?.swagger;
+  const majorMinor = openApiMajorMinor(version);
+  const supported = targetConfig.supportedOpenApiVersions ?? SUPPORTED_OPENAPI_VERSIONS;
+
+  if (majorMinor !== null && supported.includes(majorMinor)) {
+    return;
+  }
+
+  const found = version === undefined || version === null || String(version).trim() === ""
+    ? "unknown"
+    : String(version).trim();
+
+  throw new Error(
+    `Unsupported OpenAPI version "${found}": supported versions are ${supported.join(", ")}. Request a supported rendering through the Product's \`apiContractUrl\` or \`--url\`.`
+  );
 }
 
 // The python target consumes the Canonical Client Spec directly and performs
@@ -488,6 +528,18 @@ program
     await writeFile(rawSpecFilePath, fetchedSpec.body, "utf8");
     console.log(`Fetched the specification to ${rawSpecFilePath}`);
 
+    if (fetchedSpec.extension === "json") {
+      let document;
+
+      try {
+        document = JSON.parse(fetchedSpec.body);
+      } catch {
+        throw new Error("Failed to parse the JSON specification.");
+      }
+
+      validateOpenApiVersionForTarget(document, targetConfig);
+    }
+
     const canonicalDocument = canonicalizeFetchedSpec(fetchedSpec);
     let specFilePath = rawSpecFilePath;
 
@@ -554,4 +606,4 @@ program
 
 runIfMain(import.meta.url, program);
 
-export { canonicalizeFetchedSpec, validateOptionsForTarget, requireCanonicalClientSpecForTarget };
+export { canonicalizeFetchedSpec, validateOpenApiVersionForTarget, validateOptionsForTarget, requireCanonicalClientSpecForTarget };

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   canonicalizeFetchedSpec,
   requireCanonicalClientSpecForTarget,
+  validateOpenApiVersionForTarget,
   validateOptionsForTarget
 } from "../src/cli.mjs";
 
@@ -57,8 +58,8 @@ test("canonicalizeFetchedSpec skips YAML specs", () => {
   assert.equal(canonicalizeFetchedSpec({ extension: "yaml", body: "openapi: 3.1.0" }), null);
 });
 
-const PYTHON_TARGET_CONFIG = { runner: "openapi-python-client", extension: "json", packageVersion: "0.1.0" };
-const TS_TARGET_CONFIG = { runner: "openapi-generator", generator: "typescript-fetch", extension: "json" };
+const PYTHON_TARGET_CONFIG = { runner: "openapi-python-client", extension: "json", packageVersion: "0.1.0", supportedOpenApiVersions: ["3.0", "3.1"] };
+const TS_TARGET_CONFIG = { runner: "openapi-generator", generator: "typescript-fetch", extension: "json", supportedOpenApiVersions: ["3.0", "3.1"] };
 
 test("validateOptionsForTarget allows the ts target to use --property, --skip-validate-spec, and --prune-unused-models", () => {
   assert.doesNotThrow(() =>
@@ -116,4 +117,56 @@ test("requireCanonicalClientSpecForTarget allows a YAML specification for openap
 
 test("requireCanonicalClientSpecForTarget never rejects once a Canonical Client Spec was produced", () => {
   assert.doesNotThrow(() => requireCanonicalClientSpecForTarget(PYTHON_TARGET_CONFIG, { paths: {} }));
+});
+
+test("validateOpenApiVersionForTarget accepts 3.0.x contracts for the ts target", () => {
+  assert.doesNotThrow(() =>
+    validateOpenApiVersionForTarget({ openapi: "3.0.4" }, TS_TARGET_CONFIG)
+  );
+});
+
+test("validateOpenApiVersionForTarget accepts 3.1.x contracts for the ts target", () => {
+  assert.doesNotThrow(() =>
+    validateOpenApiVersionForTarget({ openapi: "3.1.0" }, TS_TARGET_CONFIG)
+  );
+});
+
+test("validateOpenApiVersionForTarget accepts 3.0.x contracts for the python target", () => {
+  assert.doesNotThrow(() =>
+    validateOpenApiVersionForTarget({ openapi: "3.0.4" }, PYTHON_TARGET_CONFIG)
+  );
+});
+
+test("validateOpenApiVersionForTarget accepts 3.1.x contracts for the python target", () => {
+  assert.doesNotThrow(() =>
+    validateOpenApiVersionForTarget({ openapi: "3.1.0" }, PYTHON_TARGET_CONFIG)
+  );
+});
+
+test("validateOpenApiVersionForTarget rejects a 3.2.0 contract with one actionable line", () => {
+  assert.throws(
+    () => validateOpenApiVersionForTarget({ openapi: "3.2.0" }, TS_TARGET_CONFIG),
+    (error) => {
+      assert.match(error.message, /Unsupported OpenAPI version "3\.2\.0"/);
+      assert.match(error.message, /supported versions are 3\.0, 3\.1/);
+      assert.match(error.message, /apiContractUrl/);
+      assert.match(error.message, /--url/);
+      assert.equal(error.message.includes("\n"), false);
+      return true;
+    }
+  );
+});
+
+test("validateOpenApiVersionForTarget rejects a 2.0 contract", () => {
+  assert.throws(
+    () => validateOpenApiVersionForTarget({ openapi: "2.0" }, TS_TARGET_CONFIG),
+    /Unsupported OpenAPI version "2\.0".*supported versions are 3\.0, 3\.1.*apiContractUrl.*--url/
+  );
+});
+
+test("validateOpenApiVersionForTarget rejects a Swagger-style 2.0 contract for the python target", () => {
+  assert.throws(
+    () => validateOpenApiVersionForTarget({ swagger: "2.0" }, PYTHON_TARGET_CONFIG),
+    /Unsupported OpenAPI version "2\.0"/
+  );
 });
