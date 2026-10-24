@@ -17,9 +17,11 @@ Infer the repo from `git remote -v`; `gh` does this automatically when run insid
 
 This repo generates SDKs from another repo's API Contract and publishes them into a third set of repos. Issues stay here unless they are genuinely about one of the others:
 
-- **`lbacik/globaldb`** (private) — the JsonHub API. Owns the API Contract. File issues there when the fix belongs to the API itself.
-- **`lbacik/jsonhub-sdk-ts`** — the TypeScript SDK Target's published output. Generated; do not file implementation issues there.
-- **`lbacik/jsonhub-sdk-python`** — the Python SDK Target's published output. Generated; same.
+- **`lbacik/globaldb`** (private) — the JsonHub API. Owns the JsonHub API Contract. File issues there when the fix belongs to the API itself.
+- **`lbacik/jsonhub-sdk-ts`** — the TypeScript SDK Target's published output for JsonHub. Generated; do not file implementation issues there.
+- **`lbacik/jsonhub-sdk-python`** — the Python SDK Target's published output for JsonHub. Generated; same.
+- **`lbacik/paysubscriptions`** — the PaySubscriptions API. Owns the PaySubscriptions API Contract. File contract issues there.
+- **`lbacik/paysubscriptions-sdk-ts`** — the TypeScript SDK Target's published output for PaySubscriptions. Generated; do not file implementation issues there.
 - **`lbacik/jsonhub-sdk`** — the hand-written PHP SDK. Not an SDK Target; out of scope here.
 
 ## Pull requests as a triage surface

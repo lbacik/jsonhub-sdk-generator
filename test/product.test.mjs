@@ -222,3 +222,54 @@ test("every committed Product resolves for each SDK Target it enables", async ()
     }
   }
 });
+
+// The second Product enables only the `ts` SDK Target: it resolves for `ts`
+// with the PaySubscriptions package, repository, API Contract URL and secret,
+// while `python` reports not enabled. Read from the committed files so a
+// broken products/paysubscriptions/ fails `npm test` here.
+test("the committed paysubscriptions Product resolves for ts and reports python as not enabled", async () => {
+  const productsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "products");
+  const names = readdirSync(productsDir).filter((entry) =>
+    statSync(join(productsDir, entry)).isDirectory()
+  );
+  assert.ok(names.includes("paysubscriptions"), "products/ holds no paysubscriptions Product");
+
+  const products = {};
+  for (const name of names) {
+    products[name] = JSON.parse(await readFile(join(productsDir, name, "product.json"), "utf8"));
+  }
+
+  assert.equal(products.paysubscriptions.packageName, "paysubscriptions-sdk");
+
+  const ts = resolveProduct({
+    products,
+    product: "paysubscriptions",
+    target: "ts",
+    event: {},
+    hasHandOwnedMetadata: existsSync(join(productsDir, "paysubscriptions", "ts", "package.metadata.json"))
+  });
+
+  assert.equal(ts.enabled, true);
+  assert.equal(ts.repository, "lbacik/paysubscriptions-sdk-ts");
+  assert.equal(ts.packageName, "paysubscriptions-sdk");
+  assert.equal(
+    ts.apiContractUrl,
+    "https://paysubscriptions.com/api/docs.jsonopenapi?spec_version=3.0.0"
+  );
+  assert.equal(ts.tokenSecret, "PAYSUBSCRIPTIONS_SDK_TS_TOKEN");
+  assert.equal(ts.handOwnedMetadata, "products/paysubscriptions/ts/package.metadata.json");
+
+  const python = resolveProduct({
+    products,
+    product: "paysubscriptions",
+    target: "python",
+    event: {},
+    hasHandOwnedMetadata: false
+  });
+
+  assert.equal(python.enabled, false);
+  assert.equal(python.repository, null);
+  assert.equal(python.handOwnedMetadata, null);
+  assert.equal(python.packageName, "paysubscriptions-sdk");
+  assert.equal(python.tokenSecret, "PAYSUBSCRIPTIONS_SDK_PYTHON_TOKEN");
+});
