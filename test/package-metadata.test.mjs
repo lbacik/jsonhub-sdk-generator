@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   applyBump,
@@ -425,4 +428,53 @@ test("buildPoetryManifest rejects a generated manifest with no [tool.poetry] tab
       }),
     /\[tool\.poetry\]/
   );
+});
+
+// Guards the committed PaySubscriptions hand-owned metadata: the generated
+// npm manifest carries name paysubscriptions-sdk with the PaySubscriptions
+// author, licence, repository, keywords and homepage.
+test("the committed paysubscriptions ts metadata builds the paysubscriptions npm manifest", async () => {
+  const metadataPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "products",
+    "paysubscriptions",
+    "ts",
+    "package.metadata.json"
+  );
+  const paysubscriptionsMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
+
+  assert.equal(paysubscriptionsMetadata.author, "Łukasz Bacik <mail@luka.sh>");
+  assert.equal(paysubscriptionsMetadata.license, "Apache-2.0");
+  assert.deepEqual(paysubscriptionsMetadata.repository, {
+    type: "git",
+    url: "https://github.com/lbacik/paysubscriptions-sdk-ts.git"
+  });
+  assert.deepEqual(paysubscriptionsMetadata.keywords, [
+    "paysubscriptions",
+    "sdk",
+    "openapi",
+    "typescript",
+    "api-client"
+  ]);
+  assert.equal(
+    paysubscriptionsMetadata.homepage,
+    "https://github.com/lbacik/paysubscriptions/blob/main/docs/api-client.md#typescript-sdk"
+  );
+
+  const manifest = buildPackageManifest({
+    target: "ts",
+    packageName: "paysubscriptions-sdk",
+    generatedManifest,
+    handOwnedMetadata: paysubscriptionsMetadata,
+    version: "1.0.0",
+    sourceApiVersion: "v0.1.0"
+  });
+
+  assert.equal(manifest.name, "paysubscriptions-sdk");
+  assert.equal(manifest.author, paysubscriptionsMetadata.author);
+  assert.equal(manifest.license, "Apache-2.0");
+  assert.deepEqual(manifest.repository, paysubscriptionsMetadata.repository);
+  assert.deepEqual(manifest.keywords, paysubscriptionsMetadata.keywords);
+  assert.equal(manifest.homepage, paysubscriptionsMetadata.homepage);
 });

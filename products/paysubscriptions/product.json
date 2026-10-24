@@ -1,0 +1,5 @@
+{
+  "packageName": "paysubscriptions-sdk",
+  "apiContractUrl": "https://paysubscriptions.com/api/docs.jsonopenapi?spec_version=3.0.0",
+  "targets": { "ts": { "repository": "lbacik/paysubscriptions-sdk-ts" } }
+}

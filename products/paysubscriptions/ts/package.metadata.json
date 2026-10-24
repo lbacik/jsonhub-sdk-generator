@@ -1,0 +1,10 @@
+{
+  "author": "Łukasz Bacik <mail@luka.sh>",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lbacik/paysubscriptions-sdk-ts.git"
+  },
+  "keywords": ["paysubscriptions", "sdk", "openapi", "typescript", "api-client"],
+  "homepage": "https://github.com/lbacik/paysubscriptions/blob/main/docs/api-client.md#typescript-sdk"
+}
